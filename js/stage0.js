@@ -50,6 +50,11 @@ function save(patch) {
 
 class UserError extends Error {}
 
+/** 技術紀錄裡的查詢字串：有數字的只留前 4 個字，其餘用「•」蓋掉，避免電話號碼跟著紀錄被複製出去。 */
+function maskQuery(q) {
+  return /\d{3}/.test(q) ? [...q].map((c, i) => (i >= 4 && /\d/.test(c) ? "•" : c)).join("") : q;
+}
+
 /** 把錯誤翻成看得懂的話。 */
 function explain(e) {
   if (e instanceof UserError) return e.message;
@@ -74,7 +79,7 @@ async function api(method, url, { params = {}, body, rawBody, headers = {} } = {
       headers: { Authorization: "Bearer " + state.token, ...(body ? { "Content-Type": "application/json" } : {}), ...headers },
       body: rawBody ?? (body ? JSON.stringify(body) : undefined),
     });
-    log(`${method} ${u.pathname}${u.searchParams.has("query") ? "?query=" + u.searchParams.get("query") : ""} → ${res.status}`);
+    log(`${method} ${u.pathname}${u.searchParams.has("query") ? "?query=" + maskQuery(u.searchParams.get("query")) : ""} → ${res.status}`);
     const retryable = res.status === 429 || (method === "GET" && res.status >= 500);
     if (retryable && attempt < 2) {
       await sleep(attempt === 0 ? 3000 : 10000);
@@ -177,9 +182,10 @@ function setupInstall() {
 // ---------- 1. 登入 ----------
 
 function setLoggedIn(on) {
-  for (const id of ["b-write", "b-photo"]) $(id).disabled = !on;
+  for (const id of ["b-write", "b-photo", "b-matrix"]) $(id).disabled = !on;
   const has = Boolean(saved().last);
-  for (const id of ["b-reread", "b-search", "b-mark"]) $(id).disabled = !on || !has;
+  for (const id of ["b-reread", "b-search"]) $(id).disabled = !on || !has;
+  $("b-mark").disabled = !on || !(saved().created || []).length;
 }
 
 function login() {
@@ -413,6 +419,85 @@ async function searchTest() {
   summary.search = verdict + "\n" + tries.map(([label], i) => `  ${label}：${foundAt[i] === null ? "查不到" : `第 ${foundAt[i]} 秒查到`}`).join("\n");
 }
 
+// ---------- 4b. 進階查重：同一支號碼存成不同寫法，哪些查法找得到 ----------
+
+// 全部是假號碼。目的：通訊錄裡的號碼不一定都是規則的寫法（例如手機上手動新增的），要知道怎麼查才不會漏。
+const MATRIX_STORED = [
+  ["A", "0987-654-321", "規則的寫法"], ["B", "0987654321", "只有數字"], ["C", "0987 654 321", "用空白隔開"],
+  ["D", "+886987654321", "+886 連寫"], ["E", "+886 987 654 321", "+886 用空白隔開"], ["F", "0987-654321", "只有一條橫線"],
+];
+const MATRIX_QUERIES = ["0987-654-321", "0987654321", "0987 654 321", "+886987654321", "+886 987 654 321", "0987-654321",
+  "0987", "0987-654", "654-321", "654", "321", "987654321", "886987654321", "+886 987", "+886"];
+
+async function matrixTest() {
+  const label = await findOrCreateLabel(TEST_CATEGORY);
+  const made = { ...(saved().matrix || {}) };
+  for (const [L, value] of MATRIX_STORED) {
+    if (made[L]) continue; // 之前按過就沿用，不重複新增
+    $("r-matrix").textContent = `新增假聯絡人 ${L}…`;
+    const body = {
+      names: [{ givenName: `${TEST_CATEGORY}-測試查重${L}` }],
+      phoneNumbers: [{ value, type: "mobile" }],
+      memberships: [{ contactGroupMembership: { contactGroupResourceName: label.resourceName } }],
+    };
+    const r = await api("POST", PEOPLE + "people:createContact", { params: { personFields: "names,phoneNumbers" }, body });
+    made[L] = r.resourceName;
+    save({ matrix: made, created: [...(saved().created || []), r.resourceName] });
+    const stored = (r.phoneNumbers || []).map((x) => x.value).join("、");
+    if (stored !== value) log(`注意：${L} 存進去的寫法被改了：送「${value}」，讀到「${stored}」`);
+  }
+  setLoggedIn(true);
+  const byRn = Object.fromEntries(Object.entries(made).map(([L, rn]) => [rn, L]));
+  const found = MATRIX_QUERIES.map(() => new Set());
+  const render = (waiting) => {
+    const head = "<tr><th>查的字</th><th>找到哪幾筆</th></tr>";
+    const rows = MATRIX_QUERIES.map((q, i) => `<tr><td>${esc(q)}</td><td>${[...found[i]].sort().join(" ") || "—"}</td></tr>`).join("");
+    const legend = MATRIX_STORED.map(([L, v, d]) => `${L}＝${v}（${d}）`).join("\n");
+    $("r-matrix").innerHTML = `<div>${esc(legend)}</div><table>${head}${rows}</table>${waiting ? `<div>${esc(waiting)}</div>` : ""}`;
+  };
+  await api("GET", PEOPLE + "people:searchContacts", { params: { query: "", readMask: "names" } });
+  let lastTotal = -1;
+  for (const wait of [5, 10, 15, 25]) {
+    render(`等 ${wait} 秒再查（Google 需要一點時間才查得到新資料）…`);
+    await sleep(wait * 1000);
+    for (let i = 0; i < MATRIX_QUERIES.length; i++) {
+      const r = await api("GET", PEOPLE + "people:searchContacts", { params: { query: MATRIX_QUERIES[i], readMask: "names,phoneNumbers", pageSize: 30 } });
+      for (const x of r.results || []) if (byRn[x.person?.resourceName]) found[i].add(byRn[x.person.resourceName]);
+      await sleep(250);
+    }
+    const total = found.reduce((n, s) => n + s.size, 0);
+    render("");
+    if (total === lastTotal && total > 0) break; // 連續兩輪結果一樣就不用再等
+    lastTotal = total;
+  }
+  const all = MATRIX_STORED.map(([L]) => L).join("");
+  const full = MATRIX_QUERIES.filter((q, i) => [...found[i]].sort().join("") === all);
+  $("r-matrix").insertAdjacentHTML("afterbegin", `<div class="ok">✓ 測完了。請按最下面的「複製測試結果」貼給 Claude，由他判斷查重要怎麼做。</div>`);
+  summary.matrix = "存法：" + MATRIX_STORED.map(([L, v]) => `${L}=${v}`).join("；") + "\n"
+    + MATRIX_QUERIES.map((q, i) => `  查「${q}」→ ${[...found[i]].sort().join("") || "（都沒找到）"}`).join("\n")
+    + `\n  六筆都找得到的查法：${full.join("、") || "沒有"}`;
+}
+
+// ---------- 6. 請您親眼確認（用選的） ----------
+
+const OBS = [["o-mode", "從主畫面圖標開啟"], ["o-web", "電腦的 Google 聯絡人"], ["o-phone", "手機通訊錄"], ["o-call", "來電畫面"], ["o-ext", "撥分機"]];
+
+function setupObs() {
+  const keep = saved().obs || {};
+  const update = () => {
+    const obs = Object.fromEntries(OBS.map(([id]) => [id, $(id).value]));
+    save({ obs });
+    const lines = OBS.filter(([id]) => obs[id]).map(([id, title]) => `${title}：${obs[id]}`);
+    if (lines.length) summary.obs = lines.join("\n");
+    else delete summary.obs;
+  };
+  for (const [id] of OBS) {
+    if (keep[id]) $(id).value = keep[id];
+    $(id).addEventListener("change", update);
+  }
+  update();
+}
+
 // ---------- 5. 掛「_待刪除」 ----------
 
 async function markTrash() {
@@ -431,7 +516,7 @@ async function markTrash() {
 // ---------- 複製結果 ----------
 
 async function copyResults() {
-  const order = [["env", "0 手機狀況"], ["install", "安裝"], ["login", "1 登入"], ["write", "2 寫入"], ["reread", "2 寫入"], ["photo", "3 照片"], ["search", "4 查重"], ["mark", "5 待刪除"]];
+  const order = [["env", "0 手機狀況"], ["install", "安裝"], ["login", "1 登入"], ["write", "2 寫入"], ["reread", "2 寫入"], ["photo", "3 照片"], ["search", "4 查重"], ["matrix", "4b 進階查重"], ["obs", "6 親眼確認"], ["mark", "5 待刪除"]];
   const text = [`【雋品名片 階段0 測試結果】${CONFIG.VERSION}`, new Date().toLocaleString("zh-TW")]
     .concat(order.filter(([k]) => summary[k]).map(([k, title]) => `■ ${title}\n${summary[k]}`))
     .concat(["■ 技術紀錄", $("log").textContent.trim()])
@@ -464,7 +549,9 @@ if (!CONFIG.GOOGLE_CLIENT_ID) {
 action("b-write", "write", writeTest);
 action("b-reread", "write", reread);
 action("b-search", "search", searchTest);
+action("b-matrix", "matrix", matrixTest);
 action("b-mark", "mark", markTrash);
+setupObs();
 $("b-photo").addEventListener("click", () => $("i-photo").click());
 $("i-photo").addEventListener("change", async () => {
   const file = $("i-photo").files[0];

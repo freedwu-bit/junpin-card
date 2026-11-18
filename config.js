@@ -4,5 +4,5 @@ export const CONFIG = {
   GOOGLE_CLIENT_ID: "193504946492-5bue14e1l80j7acsst9an291s1gbes71.apps.googleusercontent.com",
   WORKSPACE_DOMAIN: "junpin.com.tw",    // 只允許這個公司網域的帳號
   PHOTO_FOLDER: "雋品名片_照片",         // 名片照片在雲端硬碟的資料夾名稱
-  VERSION: "2026-11-18 版-2",
+  VERSION: "2026-11-18 版-3",
 };

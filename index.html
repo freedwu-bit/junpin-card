@@ -94,6 +94,28 @@
   </section>
 
   <section>
+    <h2><span class="no">4b</span>進階查重測試</h2>
+    <p class="hint">會再新增 6 筆假聯絡人（「廠商-測試查重A」到「F」，同一支假號碼、六種寫法），看哪一種查法才不會漏。大約等 1 分鐘。之後第 5 步會一起掛「_待刪除」。</p>
+    <button id="b-matrix" disabled>開始進階查重測試</button>
+    <div class="result" id="r-matrix"></div>
+  </section>
+
+  <section>
+    <h2><span class="no">6</span>請您親眼確認（用選的）</h2>
+    <p class="hint">看的是第 2 步那筆「廠商-測試王小明_大順廚具」。還沒看的先留著不選，之後再回來選也可以，選過的會記住。</p>
+    <label for="o-mode">從主畫面圖標開啟時，畫面是</label>
+    <select id="o-mode"><option value="">（還沒試）</option><option>全螢幕，像 App 一樣</option><option>還是看得到瀏覽器的網址列</option><option>裝不起來</option></select>
+    <label for="o-web">電腦開 Google 聯絡人，這一筆的姓名顯示</label>
+    <select id="o-web"><option value="">（還沒看）</option><option>整串都在</option><option>順序不對或被拆開</option></select>
+    <label for="o-phone">手機通訊錄裡，這一筆的姓名顯示</label>
+    <select id="o-phone"><option value="">（還沒看）</option><option>整串都在</option><option>順序不對或被拆開</option><option>手機通訊錄裡找不到這一筆</option></select>
+    <label for="o-call">用第 2 步填的那支電話打過來，來電畫面顯示</label>
+    <select id="o-call"><option value="">（還沒測／第 2 步沒填號碼）</option><option>整串都看得到</option><option>有顯示但後面被截掉</option><option>只顯示號碼，沒有名字</option></select>
+    <label for="o-ext">撥有分機的公司電話（第 2 步有填真的號碼才測得到）</label>
+    <select id="o-ext"><option value="">（還沒測／沒有填真的號碼）</option><option>接通後停一下，自動按了分機</option><option>沒有自動按分機</option><option>撥號畫面上分機不見了</option></select>
+  </section>
+
+  <section>
     <h2><span class="no">5</span>測完：標成「_待刪除」</h2>
     <p class="hint">把這個測試頁新增的測試聯絡人都掛上「_待刪除」標籤，之後由您自己到 Google 聯絡人刪除。</p>
     <button id="b-mark" class="second" disabled>掛上「_待刪除」</button>
