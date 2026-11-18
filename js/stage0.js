@@ -183,6 +183,7 @@ function setupInstall() {
 
 function setLoggedIn(on) {
   for (const id of ["b-write", "b-photo", "b-matrix"]) $(id).disabled = !on;
+  $("b-backend").disabled = !on || !CONFIG.BACKEND_URL;
   const has = Boolean(saved().last);
   for (const id of ["b-reread", "b-search"]) $(id).disabled = !on || !has;
   $("b-mark").disabled = !on || !(saved().created || []).length;
@@ -483,6 +484,57 @@ async function matrixTest() {
     + `\n  六筆都找得到的查法：${full.join("、") || "沒有"}`;
 }
 
+// ---------- 7. 後台連線測試（不用 Claude、不花額度） ----------
+
+/** 送一次資料到後台。用 text/plain 是為了讓瀏覽器不必先問後台「可不可以送」（Apps Script 不會回答那種詢問）。 */
+async function callBackend(payload) {
+  const t0 = performance.now();
+  const res = await fetch(CONFIG.BACKEND_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(payload),
+    redirect: "follow",
+  });
+  const text = await res.text();
+  const ms = Math.round(performance.now() - t0);
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    /* 不是 JSON：多半是 Google 的登入頁或錯誤頁，表示後台的「誰可以存取」沒設成所有人 */
+  }
+  log(`後台 ${res.status} ${ms}ms ${json ? JSON.stringify(json) : "（不是預期的格式）" + text.slice(0, 120).replace(/\s+/g, " ")}`);
+  return { status: res.status, ms, json };
+}
+
+async function backendTest() {
+  if (!state.token || Date.now() > state.tokenExp) throw new UserError("請先做第 1 步登入。");
+  const lines = [];
+  const say = (k, t) => {
+    lines.push([k, t]);
+    show("backend", lines);
+  };
+  // 1. 一般連線（連三次，看第一次和之後的速度）
+  const times = [];
+  for (let i = 0; i < 3; i++) {
+    const r = await callBackend({ action: "ping", token: state.token });
+    if (!r.json) throw new UserError("連得到後台，但回來的不是預期的內容（後台的「誰可以存取」可能沒有設成「所有人」）。請把結果複製給 Claude。");
+    if (!r.json.ok) throw new UserError(`後台拒絕了這次請求：${r.json.error}`);
+    times.push(r.ms);
+  }
+  say("ok", `連得到後台，公司帳號通過檢查（三次耗時：${times.map((t) => (t / 1000).toFixed(1)).join("、")} 秒）`);
+  // 2. 照片大小的資料（約 400 KB）傳不傳得過去
+  const pad = "A".repeat(400000);
+  const big = await callBackend({ action: "ping", token: state.token, pad });
+  if (big.json?.ok && big.json.received === pad.length) say("ok", `一張照片大小的資料（約 400 KB）傳得過去（${(big.ms / 1000).toFixed(1)} 秒）`);
+  else say("bad", "照片大小的資料傳不過去，請把結果複製給 Claude");
+  // 3. 沒帶登入資訊、帶假的登入資訊：後台都應該拒絕
+  const anon = await callBackend({ action: "ping" });
+  const fake = await callBackend({ action: "ping", token: "not-a-real-token" });
+  if (anon.json && anon.json.ok === false && fake.json && fake.json.ok === false) say("ok", "沒登入或亂填登入資訊的請求，後台都會拒絕");
+  else say("bad", "注意：沒登入的請求沒有被後台拒絕，請把結果複製給 Claude");
+}
+
 // ---------- 6. 請您親眼確認（用選的） ----------
 
 const OBS = [["o-mode", "從主畫面圖標開啟"], ["o-web", "電腦的 Google 聯絡人"], ["o-phone", "手機通訊錄"], ["o-call", "來電畫面"], ["o-ext", "撥分機"]];
@@ -521,7 +573,7 @@ async function markTrash() {
 // ---------- 複製結果 ----------
 
 async function copyResults() {
-  const order = [["env", "0 手機狀況"], ["install", "安裝"], ["login", "1 登入"], ["write", "2 寫入"], ["reread", "2 寫入"], ["photo", "3 照片"], ["search", "4 查重"], ["matrix", "4b 進階查重"], ["obs", "6 親眼確認"], ["mark", "5 待刪除"]];
+  const order = [["env", "0 手機狀況"], ["install", "安裝"], ["login", "1 登入"], ["write", "2 寫入"], ["reread", "2 寫入"], ["photo", "3 照片"], ["search", "4 查重"], ["matrix", "4b 進階查重"], ["backend", "7 後台連線"], ["obs", "6 親眼確認"], ["mark", "5 待刪除"]];
   const text = [`【雋品名片 階段0 測試結果】${CONFIG.VERSION}`, new Date().toLocaleString("zh-TW")]
     .concat(order.filter(([k]) => summary[k]).map(([k, title]) => `■ ${title}\n${summary[k]}`))
     .concat(["■ 技術紀錄", $("log").textContent.trim()])
@@ -555,6 +607,8 @@ action("b-write", "write", writeTest);
 action("b-reread", "write", reread);
 action("b-search", "search", searchTest);
 action("b-matrix", "matrix", matrixTest);
+action("b-backend", "backend", backendTest);
+if (!CONFIG.BACKEND_URL) $("r-backend").textContent = "後台還沒設定好，這一項暫時不能按。";
 action("b-mark", "mark", markTrash);
 setupObs();
 $("b-photo").addEventListener("click", () => $("i-photo").click());
