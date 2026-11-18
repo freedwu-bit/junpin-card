@@ -104,7 +104,7 @@ async function afterLogin() {
 }
 
 function goHome() {
-  $("home-acct").textContent = "登入帳號：" + G.account() + "　｜　" + (S.mode === "category" ? "類別模式" : "一般模式");
+  $("home-acct").textContent = "登入帳號：" + G.account() + "　｜　" + (S.mode === "category" ? "類別模式" : "一般模式") + "　｜　版本：" + CONFIG.VERSION;
   const d = store().draft;
   const has = d && (d.name || d.company || (d.phones || []).some((p) => p.value) || (d.emails || []).some(Boolean));
   $("draft-box").hidden = !has;
@@ -555,7 +555,7 @@ function startCard(withCamera) {
 async function main() {
   G = await import(demo ? "./google_mock.js" : "./google.js");
   $("demo-banner").hidden = !demo;
-  $("set-ver").textContent = CONFIG.VERSION + (demo ? "（示範）" : "");
+  $("set-ver").textContent = $("login-ver").textContent = CONFIG.VERSION + (demo ? "（示範）" : "");
 
   $("b-login").addEventListener("click", async () => {
     const msg = $("m-login");
