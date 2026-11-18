@@ -219,7 +219,9 @@ function tidyAddress() {
   // 英文、國外地址本來就不整理，不算問題，不用標黃色
   if (a.reason === "不是中文地址" || a.reason.startsWith("國家不是台灣")) return "";
   input.classList.add("warn");
-  note.textContent = `這個地址程式看不懂（${a.reason}），會照您寫的原樣存。`;
+  note.textContent = a.suggest
+    ? "這個地址的順序看起來是反的（樓或號寫在路名前面）。不改的話會照您寫的原樣存；也可以按下面的按鈕改成建議的寫法。"
+    : `這個地址程式看不懂（${a.reason}），會照您寫的原樣存。`;
   if (a.suggest) {
     const b = document.createElement("button");
     b.type = "button";

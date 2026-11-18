@@ -11,137 +11,178 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="雋品名片">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<style>
-  :root { --navy:#182b49; --gold:#c4944a; --bg:#f4f5f7; --card:#fff; --ink:#1c2330; --mute:#667085; --ok:#1a7f4b; --bad:#b42318; --warn:#b54708; --line:#dfe3ea; }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body { margin:0; background:var(--bg); color:var(--ink); font: 17px/1.6 -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
-  header { background:var(--navy); color:#fff; padding: calc(14px + env(safe-area-inset-top)) 16px 14px; }
-  header h1 { margin:0; font-size:20px; letter-spacing:.04em; }
-  header p { margin:2px 0 0; font-size:13px; opacity:.8; }
-  main { max-width: 640px; margin: 0 auto; padding: 12px 16px calc(32px + env(safe-area-inset-bottom)); }
-  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 14px 12px; margin:12px 0; }
-  section h2 { margin:0 0 4px; font-size:17px; display:flex; gap:8px; align-items:baseline; }
-  section h2 .no { color:var(--gold); font-variant-numeric: tabular-nums; }
-  section p.hint { margin:0 0 10px; color:var(--mute); font-size:14.5px; }
-  button { font: inherit; font-weight:600; width:100%; min-height:50px; border:0; border-radius:10px; background:var(--navy); color:#fff; padding:10px 14px; }
-  button.second { background:#fff; color:var(--navy); border:1.5px solid var(--navy); }
-  button:disabled { opacity:.4; }
-  button + button { margin-top:8px; }
-  label { display:block; font-size:14.5px; color:var(--mute); margin:8px 0 2px; }
-  input[type=tel], select { font: inherit; width:100%; min-height:46px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#fff; color:var(--ink); }
-  .result { margin-top:10px; font-size:15.5px; white-space:pre-wrap; overflow-wrap:anywhere; }
-  .result:empty { display:none; }
-  .result .ok { color:var(--ok); font-weight:600; }
-  .result .bad { color:var(--bad); font-weight:600; }
-  .result .warn { color:var(--warn); font-weight:600; }
-  .pill { display:inline-block; font-size:13px; padding:1px 9px; border-radius:99px; background:#eef1f6; color:var(--mute); }
-  .pill.ok { background:#e3f4ea; color:var(--ok); } .pill.bad { background:#fde8e6; color:var(--bad); }
-  table { border-collapse:collapse; width:100%; font-size:14.5px; margin-top:6px; }
-  td, th { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
-  details { margin:12px 0; color:var(--mute); font-size:13px; }
-  details pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#fff; border:1px solid var(--line); border-radius:8px; padding:8px; max-height:300px; overflow:auto; }
-  .banner { border-radius:10px; padding:10px 12px; margin:12px 0; font-size:15px; background:#fff7e6; border:1px solid #f1d9a8; color:#7a4b00; }
-  .banner:empty { display:none; }
-</style>
+<link rel="stylesheet" href="css/app.css">
 </head>
 <body>
 <header>
   <h1>雋品名片</h1>
-  <p>階段 0 測試頁　<span id="ver"></span></p>
+  <button id="b-home" hidden>首頁</button>
+  <button id="b-settings" hidden>設定</button>
 </header>
+<div id="demo-banner" hidden>示範模式：不會連到 Google，畫面上的聯絡人都是假的。</div>
+
 <main>
-  <div class="banner" id="banner"></div>
-
-  <section>
-    <h2><span class="no">0</span>這支手機的狀況</h2>
-    <div class="result" id="r-env"></div>
+  <!-- 登入 -->
+  <section class="view" id="v-login" hidden>
+    <div class="card">
+      <h3>請先登入</h3>
+      <p class="sub">用公司的 Google 帳號登入，並同意「聯絡人」和「本 App 建立的雲端硬碟檔案」兩項。名片只會存進您自己的通訊錄和雲端硬碟。</p>
+      <button id="b-login">用公司帳號登入</button>
+      <div class="msg" id="m-login"></div>
+    </div>
   </section>
 
-  <section>
-    <h2><span class="no">1</span>登入公司帳號</h2>
-    <p class="hint">用 junpin.com.tw 的 Google 帳號登入，並同意「聯絡人」和「本 App 建立的雲端硬碟檔案」兩項。</p>
-    <button id="b-login">登入</button>
-    <div class="result" id="r-login"></div>
+  <!-- 第一次使用：選姓名模式 -->
+  <section class="view" id="v-mode" hidden>
+    <h2>第一次使用：姓名要怎麼存？</h2>
+    <p class="sub">之後可以在「設定」裡改。</p>
+    <div class="stack">
+      <button class="second choice" data-mode="category">類別模式<small>存成「類別-姓名_公司」，例如：廠商-王小明_大順廚具，並自動掛上和類別同名的標籤</small></button>
+      <button class="second choice" data-mode="plain">一般模式<small>只存姓名，例如：王小明；標籤可以自己點選</small></button>
+    </div>
   </section>
 
-  <section>
-    <h2><span class="no">2</span>寫入一筆測試聯絡人</h2>
-    <p class="hint">會新增一筆假的聯絡人「廠商-測試王小明_大順廚具」，不會動到任何現有資料。想測來電畫面，就在下面填另一支電話的號碼（測完會掛「_待刪除」）。</p>
-    <label for="i-mobile">另一支手機的號碼（選填，用來測來電畫面）</label>
-    <input type="tel" id="i-mobile" inputmode="tel" placeholder="不填就用假號碼 0912-345-678">
-    <label for="i-ext">有分機的公司電話（選填，用來測分機會不會自動撥）</label>
-    <input type="tel" id="i-ext" inputmode="tel" placeholder="不填就用假號碼 02-2345-6789,123">
-    <button id="b-write" disabled style="margin-top:12px">寫入測試聯絡人</button>
-    <button id="b-reread" class="second" disabled>重新讀取，檢查有沒有變</button>
-    <div class="result" id="r-write"></div>
+  <!-- 首頁 -->
+  <section class="view" id="v-home" hidden>
+    <div class="stack" style="margin-top:8px">
+      <button class="big" id="b-shoot">拍名片</button>
+      <button class="second" id="b-manual">不拍照，直接輸入</button>
+      <div class="card" id="draft-box" hidden>
+        <h3>上次有一張還沒存</h3>
+        <p class="sub" id="draft-desc"></p>
+        <button class="second" id="b-resume">繼續填這一張</button>
+        <button class="plain" id="b-discard">丟掉，不要了</button>
+      </div>
+    </div>
+    <p class="sub" id="home-acct" style="margin-top:18px"></p>
   </section>
 
-  <section>
-    <h2><span class="no">3</span>存一張照片到雲端硬碟</h2>
-    <p class="hint">隨便拍一張（不必是名片），會存到您自己雲端硬碟的「雋品名片_照片」資料夾。</p>
-    <input type="file" id="i-photo" accept="image/*" capture="environment" hidden>
-    <button id="b-photo" disabled>拍照並上傳</button>
-    <div class="result" id="r-photo"></div>
+  <!-- 表單 -->
+  <section class="view" id="v-form" hidden>
+    <div class="card">
+      <h3>名片照片</h3>
+      <div class="photos">
+        <button type="button" class="photo" id="p-front">＋拍正面</button>
+        <button type="button" class="photo" id="p-back">＋拍反面（選填）</button>
+      </div>
+      <p class="sub" style="margin-top:8px">辨識功能還沒接上，現在請先自己輸入。照片會在存入時一起存到您的雲端硬碟。</p>
+    </div>
+
+    <div class="card">
+      <h3>姓名</h3>
+      <div id="blk-cat">
+        <label for="i-cat">類別</label>
+        <select id="i-cat"></select>
+      </div>
+      <label for="i-name">姓名</label>
+      <input type="text" id="i-name" autocomplete="off" autocapitalize="off">
+      <div class="note bad" id="n-name"></div>
+      <div id="blk-third">
+        <label for="i-third">第三段　<span class="sub">公司簡稱或專長，可以空白</span></label>
+        <input type="text" id="i-third" autocomplete="off" autocapitalize="off">
+        <div class="chips" id="third-sug"></div>
+      </div>
+      <div id="blk-labels">
+        <label>標籤　<span class="sub">選填，點一下選取</span></label>
+        <div class="chips" id="label-chips"></div>
+      </div>
+      <div class="preview" id="pv"></div>
+    </div>
+
+    <div class="card">
+      <h3>電話</h3>
+      <div id="phones"></div>
+      <button type="button" class="plain" id="b-add-phone">＋ 加一支電話</button>
+    </div>
+
+    <div class="card">
+      <h3>Email</h3>
+      <div id="emails"></div>
+      <button type="button" class="plain" id="b-add-email">＋ 加一個 Email</button>
+    </div>
+
+    <div class="card">
+      <h3>公司</h3>
+      <label for="i-company">公司全名</label>
+      <input type="text" id="i-company" autocomplete="off">
+      <div class="two">
+        <div><label for="i-dept">部門</label><input type="text" id="i-dept" autocomplete="off"></div>
+        <div><label for="i-title">職稱</label><input type="text" id="i-title" autocomplete="off"></div>
+      </div>
+      <label for="i-addr">地址</label>
+      <div class="two">
+        <div><input type="text" id="i-addr" autocomplete="off" placeholder="例：台北市信義區松仁路100號11樓"></div>
+        <div class="narrow"><input type="text" id="i-zip" inputmode="numeric" autocomplete="off" placeholder="郵遞區號"></div>
+      </div>
+      <div class="note warn" id="n-addr"></div>
+    </div>
+
+    <details class="card" id="more">
+      <summary><strong>其他欄位</strong>　<span class="sub">英文姓名、統編、網站、備註</span></summary>
+      <label for="i-en">英文姓名</label>
+      <input type="text" id="i-en" autocomplete="off">
+      <label for="i-tax">統一編號</label>
+      <input type="text" id="i-tax" inputmode="numeric" autocomplete="off">
+      <label for="i-web">網站</label>
+      <input type="url" id="i-web" autocomplete="off" autocapitalize="off">
+      <label for="i-note">備註　<span class="sub">只放您自己要寫的字</span></label>
+      <textarea id="i-note"></textarea>
+    </details>
+
+    <div class="msg" id="m-form"></div>
+
+    <div class="bar"><div class="inner">
+      <button type="button" class="second" id="b-cancel">先不存</button>
+      <button type="button" id="b-save">存入聯絡人</button>
+    </div></div>
   </section>
 
-  <section>
-    <h2><span class="no">4</span>用手機號碼找現有聯絡人</h2>
-    <p class="hint">拿第 2 步那筆測試聯絡人來查，確認存檔前「查重」做得到。新寫入的資料 Google 可能要等一下才查得到，這一步最多會等 1 分鐘。</p>
-    <button id="b-search" disabled>開始查</button>
-    <div class="result" id="r-search"></div>
+  <!-- 查重提醒 -->
+  <section class="view" id="v-dup" hidden>
+    <h2>通訊錄裡可能已經有這個人</h2>
+    <p class="sub">您要存的是：<strong id="dup-new"></strong></p>
+    <div id="dup-list"></div>
+    <div class="stack" style="margin-top:16px">
+      <button id="b-dup-new">另存新的</button>
+      <button class="second" id="b-dup-back">回去修改（先不存）</button>
+    </div>
+    <div class="msg" id="m-dup"></div>
   </section>
 
-  <section>
-    <h2><span class="no">4b</span>進階查重測試</h2>
-    <p class="hint">會再新增 6 筆假聯絡人（「廠商-測試查重A」到「F」，同一支假號碼、六種寫法），看哪一種查法才不會漏。大約等 1 分鐘。之後第 5 步會一起掛「_待刪除」。</p>
-    <button id="b-matrix" disabled>開始進階查重測試</button>
-    <div class="result" id="r-matrix"></div>
+  <!-- 存好了 -->
+  <section class="view" id="v-done" hidden>
+    <h2>存好了</h2>
+    <div class="card" id="done-box"></div>
+    <div class="stack">
+      <button class="big" id="b-next" style="min-height:90px">拍下一張</button>
+      <button class="second" id="b-done-home">回首頁</button>
+    </div>
   </section>
 
-  <section>
-    <h2><span class="no">7</span>後台連線測試</h2>
-    <p class="hint">確認手機連得到後台、而且只有公司帳號能用。不會用到 Claude，也不花任何額度。大約 20 秒。</p>
-    <button id="b-backend" disabled>開始後台連線測試</button>
-    <div class="result" id="r-backend"></div>
+  <!-- 設定 -->
+  <section class="view" id="v-settings" hidden>
+    <h2>設定</h2>
+    <div class="card">
+      <h3>姓名怎麼存</h3>
+      <div class="stack">
+        <button class="second choice" data-setmode="category">類別模式<small>類別-姓名_公司，自動掛同名標籤</small></button>
+        <button class="second choice" data-setmode="plain">一般模式<small>只存姓名，標籤自己點選</small></button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>帳號</h3>
+      <p id="set-acct" class="sub"></p>
+      <button class="second" id="b-logout">登出</button>
+    </div>
+    <p class="sub">版本：<span id="set-ver"></span>　<a href="test.html">開啟測試頁</a></p>
   </section>
-
-  <section>
-    <h2><span class="no">6</span>請您親眼確認（用選的）</h2>
-    <p class="hint">看的是第 2 步那筆「廠商-測試王小明_大順廚具」。還沒看的先留著不選，之後再回來選也可以，選過的會記住。</p>
-    <label for="o-mode">從主畫面圖標開啟時，畫面是</label>
-    <select id="o-mode"><option value="">（還沒試）</option><option>全螢幕，像 App 一樣</option><option>還是看得到瀏覽器的網址列</option><option>裝不起來</option></select>
-    <label for="o-web">電腦開 Google 聯絡人，這一筆的姓名顯示</label>
-    <select id="o-web"><option value="">（還沒看）</option><option>整串都在</option><option>順序不對或被拆開</option></select>
-    <label for="o-phone">手機通訊錄裡，這一筆的姓名顯示</label>
-    <select id="o-phone"><option value="">（還沒看）</option><option>整串都在</option><option>順序不對或被拆開</option><option>手機通訊錄裡找不到這一筆</option></select>
-    <label for="o-call">用第 2 步填的那支電話打過來，來電畫面顯示</label>
-    <select id="o-call"><option value="">（還沒測／第 2 步沒填號碼）</option><option>整串都看得到</option><option>有顯示但後面被截掉</option><option>只顯示號碼，沒有名字</option></select>
-    <label for="o-ext">撥有分機的公司電話（第 2 步有填真的號碼才測得到）</label>
-    <select id="o-ext"><option value="">（還沒測／沒有填真的號碼）</option><option>接通後停一下，自動按了分機</option><option>沒有自動按分機</option><option>撥號畫面上分機不見了</option></select>
-  </section>
-
-  <section>
-    <h2><span class="no">5</span>測完：標成「_待刪除」</h2>
-    <p class="hint">把這個測試頁新增的測試聯絡人都掛上「_待刪除」標籤，之後由您自己到 Google 聯絡人刪除。</p>
-    <button id="b-mark" class="second" disabled>掛上「_待刪除」</button>
-    <div class="result" id="r-mark"></div>
-  </section>
-
-  <section>
-    <h2>把結果傳給 Claude</h2>
-    <p class="hint">測完按這個，會把上面每一步的結果複製起來，回到電腦貼給 Claude 就好，不用自己描述。</p>
-    <button id="b-copy" class="second">複製測試結果</button>
-    <div class="result" id="r-copy"></div>
-  </section>
-
-  <details>
-    <summary>技術紀錄（給 Claude 看的）</summary>
-    <pre id="log"></pre>
-  </details>
 </main>
+
+<div id="busy" hidden><div class="box"><div class="spin"></div><div id="busy-text"></div></div></div>
+<input type="file" id="f-front" accept="image/*" capture="environment" hidden>
+<input type="file" id="f-back" accept="image/*" capture="environment" hidden>
+
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script type="module" src="js/stage0.js"></script>
+<script type="module" src="js/app.js"></script>
 </body>
 </html>
