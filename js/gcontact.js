@@ -86,7 +86,8 @@ export function suggest_third(category, { title = "", company = "" } = {}) {
  * 組出新增聯絡人要送出的內容（people:createContact 的 body）。
  * card：{ mode: "category"|"plain", category, name, third,
  *         phones: [{ value, kind }], emails: [..], address: { text, zip },
- *         company, department, title, englishName, taxId, website, note, groupResourceName }
+ *         company, department, title, englishName, taxId, website, note,
+ *         groupResourceName（一個標籤）或 groupResourceNames（多個標籤） }
  * 回傳 { body, whole, warnings }。warnings 是需要使用者看一眼的地方（看不懂的電話、地址）。
  */
 export function build_person(card) {
@@ -127,9 +128,9 @@ export function build_person(card) {
   if (py.strip(card.taxId || "")) body.userDefined = [{ key: "統編", value: py.strip(card.taxId) }];
   if (py.strip(card.website || "")) body.urls = [{ value: py.strip(card.website), type: "work" }];
   if (py.strip(card.note || "")) body.biographies = [{ value: card.note, contentType: "TEXT_PLAIN" }];
-  if (card.groupResourceName) {
-    body.memberships = [{ contactGroupMembership: { contactGroupResourceName: card.groupResourceName } }];
-  }
+  // 標籤：類別模式剛好一個（和類別同名）；一般模式可以點選零到多個
+  const groups = [...new Set([card.groupResourceName, ...(card.groupResourceNames || [])].filter(Boolean))];
+  if (groups.length) body.memberships = groups.map((g) => ({ contactGroupMembership: { contactGroupResourceName: g } }));
   return { body, whole, warnings };
 }
 
