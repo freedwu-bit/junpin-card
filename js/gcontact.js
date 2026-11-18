@@ -147,9 +147,11 @@ export function verify_created(sent, got) {
     if (n[k]) probs.push(`姓名的其他格子不是空的（${k}＝${n[k]}）`);
   }
   if (n.displayName !== want) probs.push(`顯示名稱不是整串（讀到「${n.displayName ?? ""}」）`);
-  const gotPhones = mine("phoneNumbers").map((x) => `${x.value}｜${x.type}`);
+  // 在 Google 網頁存檔後，類型會被改寫成同義的中文（mobile → 行動電話），規則文件 5.2：當成同一種
+  const kind = (t) => R.map_type(t) || t || "";
+  const gotPhones = mine("phoneNumbers").map((x) => `${x.value}｜${kind(x.type)}`);
   for (const p of sent.phoneNumbers || []) {
-    if (!gotPhones.includes(`${p.value}｜${p.type}`)) probs.push(`電話「${p.value}」（${p.type}）讀回來不一樣：${gotPhones.join("、")}`);
+    if (!gotPhones.includes(`${p.value}｜${kind(p.type)}`)) probs.push(`電話「${p.value}」（${kind(p.type)}）讀回來不一樣：${gotPhones.join("、")}`);
   }
   const gotMails = mine("emailAddresses").map((x) => x.value);
   for (const e of sent.emailAddresses || []) if (!gotMails.includes(e.value)) probs.push(`Email「${e.value}」沒有讀到`);
