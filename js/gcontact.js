@@ -175,7 +175,7 @@ export function verify_created(sent, got) {
     }
   }
   const gotUrls = mine("urls").map((x) => x.value);
-  for (const u of sent.urls || []) if (!gotUrls.includes(u.value)) probs.push(`網站欄的「${u.type}」沒有讀到`);
+  for (const u of sent.urls || []) if (!gotUrls.includes(u.value)) probs.push(`網站欄的「${u.type === "work" ? "公司網站" : u.type}」沒有讀到`);
   const gotOrg = mine("organizations");
   for (const o of sent.organizations || []) {
     if (!gotOrg.some((x) => (x.name || "") === (o.name || "") && (x.title || "") === (o.title || ""))) probs.push("公司欄讀回來不一樣");
