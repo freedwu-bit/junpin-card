@@ -84,10 +84,14 @@
         </div>
       </div>
       <div class="photos turn">
-        <div><button type="button" class="second" id="r-front" hidden>正面轉 90°</button></div>
-        <div><button type="button" class="second" id="r-back" hidden>反面轉 90°</button></div>
+        <div><button type="button" class="second" id="r-front" hidden>正面轉 90°</button><button type="button" class="second" id="a-front" hidden>用原圖</button></div>
+        <div><button type="button" class="second" id="r-back" hidden>反面轉 90°</button><button type="button" class="second" id="a-back" hidden>用原圖</button></div>
       </div>
-      <p class="sub" style="margin-top:8px">點格子可以拍照、從相簿選，或移除。辨識功能還沒接上，現在請先自己輸入。照片會在存入時存到您的雲端硬碟，並在聯絡人的「網站」欄留一個連結，之後點連結就能看原本的名片。</p>
+      <div id="rec-box" hidden>
+        <div id="rec-lines"></div>
+        <button type="button" class="second" id="b-rec-again" hidden>再辨識一次</button>
+      </div>
+      <p class="sub" style="margin-top:8px" id="photo-hint"></p>
     </div>
 
     <div class="card">

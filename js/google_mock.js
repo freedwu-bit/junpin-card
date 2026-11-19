@@ -119,3 +119,25 @@ export async function uploadPhoto(_blob, name) {
   await sleep(400);
   return { name, shared: false, link: `https://drive.google.com/file/d/demo${seq++}/view` };
 }
+
+// ---------- 假的辨識（示範模式）：不管拍什麼，都回同一張虛構的名片 ----------
+export async function ping() {
+  await sleep(200);
+  return { hasKey: true, recognize: true };
+}
+const box = (w, h) => ({ x1: Math.round(w * 0.1), y1: Math.round(h * 0.22), x2: Math.round(w * 0.9), y2: Math.round(h * 0.78) });
+// 開發時檢查「自動轉正」用：網址再加 &rot=90（或 180、270），假裝 Claude 說照片要轉這麼多度
+const rot = new URLSearchParams(globalThis.location?.search || "").get("rot");
+export async function recognize(p) {
+  await sleep(1500);
+  const base = { card_found: true, name: "", english_name: "", company: "", department: "", title: "", phones: [], emails: [], address: "", zip: "", tax_id: "", website: "", other: [], unsure: [], card_box: box(p.width, p.height), rotate_clockwise: ["90", "180", "270"].includes(rot) ? rot : "0" };
+  const result = p.side === "back"
+    ? { ...base, english_name: "Tina Lin", company: "Zhuguang Interior Design Co., Ltd.", title: "Design Director", phones: [{ kind: "手機", value: "+886 933 222 111" }], emails: ["yating@example.com"], address: "8F., No. 100, Sec. 4, Zhongxiao E. Rd., Taipei" }
+    : {
+      ...base, name: "林雅婷", company: "築光室內裝修設計有限公司", department: "設計部", title: "設計總監",
+      phones: [{ kind: "手機", value: "0933 222 111" }, { kind: "公司", value: "(02)2711-2233 #15" }, { kind: "傳真", value: "〇二－二七一一－二二三四" }],
+      emails: ["yating@example.com"], address: "臺北市大安區忠孝東路四段一〇〇號八樓", zip: "106", tax_id: "12345675", website: "www.example.com",
+      other: ["LINE：yating_design"], unsure: ["title"],
+    };
+  return { ok: true, result, model: "demo", usage: { input: 0, output: 0 }, ms: 1500 };
+}

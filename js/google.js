@@ -274,4 +274,65 @@ export async function uploadPhoto(blob, name) {
   return { name: up.name, shared: Boolean(up.shared), link: up.webViewLink || (up.id ? `https://drive.google.com/file/d/${up.id}/view` : "") };
 }
 
+// ---------- 後台（Google Apps Script）：名片辨識 ----------
+// 後台保管 Claude 的金鑰，並代為呼叫 Claude。手機這邊只把照片和登入通行證交給後台（後台用通行證確認是公司帳號）。
+
+const RECOG_HELP = "請先自己輸入，或稍後再試一次。";
+
+/** 送一次資料到後台。用 text/plain 是為了讓瀏覽器不必先問後台「可不可以送」（Apps Script 不會回答那種詢問）。 */
+async function backend(payload, timeoutMs) {
+  if (!CONFIG.BACKEND_URL) throw new UserError("後台還沒設定好。");
+  if (!state.token) throw new UserError("還沒登入，請先登入。");
+  if (Date.now() > state.tokenExp) throw new UserError("登入已過期（一小時內有效）。請重新登入後再試一次，已填的內容都還在。");
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  let text;
+  try {
+    const res = await fetch(CONFIG.BACKEND_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ ...payload, token: state.token }),
+      redirect: "follow",
+      signal: ctl.signal,
+    });
+    text = await res.text();
+  } catch (e) {
+    if (e?.name === "AbortError") throw new UserError("等太久沒有回應。" + RECOG_HELP);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new UserError("後台沒有正常回應。" + RECOG_HELP);
+  }
+}
+
+/** 問後台：連得上嗎、辨識功能準備好了沒。回傳 { hasKey（後台有沒有金鑰）, recognize（後台是不是有辨識功能的版本） }。 */
+export async function ping() {
+  const j = await backend({ action: "ping" }, 20000);
+  if (!j.ok) throw new UserError(j.error || "後台拒絕了這次請求。");
+  return { hasKey: Boolean(j.hasKey), recognize: j.recognize === true };
+}
+
+/**
+ * 辨識一張名片照片。p：{ image（JPEG 的 base64）, width, height, side: "front" 或 "back" }。
+ * 回傳後台的 { result, model, usage, ms }；失敗丟出看得懂的錯誤。
+ */
+export async function recognize(p) {
+  const j = await backend({ action: "recognize", image: p.image, width: p.width, height: p.height, side: p.side }, 75000);
+  if (j.ok) return j;
+  if (j.code === "auth") {
+    forgetToken();
+    const err = new Error(j.error);
+    err.status = 401;
+    throw err;
+  }
+  if (j.code === "no_key") throw new UserError("辨識功能還沒開通（後台還沒放金鑰）。請先自己輸入。");
+  if (j.code === "unknown_action") throw new UserError("後台還是舊版，沒有辨識功能。請先自己輸入。");
+  if (j.code === "refusal") throw new UserError("Claude 沒有處理這張照片。請重拍一張，或自己輸入。");
+  throw new UserError(`辨識沒有成功：${j.error || "原因不明"}\n${RECOG_HELP}`);
+}
+
 export const DEMO = false;

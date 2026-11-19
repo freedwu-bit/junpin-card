@@ -1,13 +1,16 @@
 // 雋品名片：正式畫面的動作。
 // 流程：登入 →（第一次選姓名模式）→ 首頁 → 拍照／輸入 → 表單（每格可改、即時預覽整串）→ 查重 → 存入 → 完成。
 // 規則都在 rules.js、address.js、gcontact.js、dedupe.js（有自動測試）；這個檔只管畫面。
-// 「辨識」還沒接上（等 Claude 額度），現在是手動輸入。
+// 「辨識」：拍好或選好照片就自動送去後台辨識（後台還沒放金鑰時不會送，維持手動輸入）。
+// 辨識結果只填空著的格子；整理成表單內容的規則在 recognize.js、裁切位置的計算在 cardimg.js（都有自動測試）。
 import { CONFIG } from "../config.js";
+import * as CI from "./cardimg.js";
 import { cn_digits, to_half } from "./cnnum.js";
 import * as D from "./dedupe.js";
 import * as GC from "./gcontact.js";
 import * as L from "./labels.js";
 import * as M from "./merge.js";
+import * as REC from "./recognize.js";
 import * as R from "./rules.js";
 import * as W from "./writer.js";
 
@@ -21,7 +24,11 @@ let G; // 連 Google 的那一層（正式：google.js；示範模式：google_m
 const S = {
   mode: "", // "category"（類別模式）或 "plain"（一般模式）
   labels: [], // 使用者的標籤：{ resourceName, name }；剛在這裡新增、還沒存進 Google 的，resourceName 是空的
-  photos: { front: null, back: null }, // { orig（原圖）, turns（順時針轉了幾次 90°）, blob（要存的圖）, url }
+  // 照片：{ file（手機給的原檔）, raw（縮小後、沒裁過的圖）, orig（目前用的底圖：raw 或自動裁好的）, turns（順時針轉了幾次 90°）,
+  //         blob（要存的圖）, url, auto（自動裁切的結果 { orig, turns }，沒有就是沒裁）, useAuto（現在用的是不是自動裁好的） }
+  photos: { front: null, back: null },
+  recog: null, // 後台的辨識功能準備好了沒（Promise："ready"、"nokey"、"old"、"unknown"）
+  rec: { front: null, back: null }, // 各面的辨識結果說明：[[種類, 文字, 動作?], …]
   thirdTouched: false, // 使用者自己改過第三段，就不再自動帶入建議
   plainLabels: new Set(), // 一般模式點選的標籤（存名稱）
   warnSeen: "", // 已經提醒過的黃色警告（同樣的警告不重複擋）
@@ -136,6 +143,7 @@ async function afterLogin() {
     busy("");
   }
   useAccount(G.account());
+  checkRecognize();
   S.mode = store().mode || "";
   if (!S.mode) view("mode");
   else goHome();
@@ -416,6 +424,8 @@ function setPhoto(side, photo) {
   tile.style.backgroundImage = photo ? `url(${photo.url})` : "";
   tile.textContent = photo ? (side === "front" ? "正面（點一下更換）" : "反面（點一下更換）") : side === "front" ? "＋正面" : "＋反面（選填）";
   $("r-" + side).hidden = !photo;
+  $("a-" + side).hidden = !photo?.auto;
+  $("a-" + side).textContent = photo?.useAuto ? "用原圖" : "用裁切後的";
   tile.classList.remove("tall");
   if (photo) {
     const im = new Image();
@@ -456,7 +466,18 @@ async function rotatePhoto(side) {
   if (!ph) return;
   const turns = (ph.turns + 1) % 4;
   const blob = await turned(ph.orig, turns);
-  setPhoto(side, { orig: ph.orig, turns, blob, url: URL.createObjectURL(blob) });
+  setPhoto(side, { ...ph, uploaded: undefined, turns, blob, url: URL.createObjectURL(blob) });
+}
+
+/** 在「自動裁切、轉正後的照片」和「原圖」之間切換。 */
+async function toggleAuto(side) {
+  const ph = S.photos[side];
+  if (!ph?.auto) return;
+  const useAuto = !ph.useAuto;
+  const orig = useAuto ? ph.auto.orig : ph.raw;
+  const turns = useAuto ? ph.auto.turns : 0;
+  const blob = await turned(orig, turns);
+  setPhoto(side, { ...ph, uploaded: undefined, orig, turns, blob, useAuto, url: URL.createObjectURL(blob) });
 }
 
 /** 把照片縮到長邊 2000 以內的 JPEG（之後送去辨識也用這個大小）。縮不了就用原檔。 */
@@ -503,7 +524,251 @@ async function onPhotoPicked(side, inputId) {
   input.value = "";
   if (!file) return;
   const blob = await shrink(file);
-  setPhoto(side, { orig: blob, turns: 0, blob, url: URL.createObjectURL(blob) });
+  setPhoto(side, { file, raw: blob, orig: blob, turns: 0, blob, url: URL.createObjectURL(blob) });
+  S.rec[side] = null;
+  renderRec();
+  await autoRecognize(side);
+}
+
+// ---------- 辨識 ----------
+
+/** 登入後在背景問一次後台：辨識功能準備好了沒。 */
+function checkRecognize() {
+  S.recog = G.ping().then((p) => (p.recognize ? (p.hasKey ? "ready" : "nokey") : "old"), () => "unknown");
+  S.recog.then(renderPhotoHint);
+}
+
+function renderPhotoHint(st) {
+  const keep = "照片會在存入時存到您的雲端硬碟，並在聯絡人的「網站」欄留一個連結，之後點連結就能看原本的名片。";
+  $("photo-hint").textContent = "點格子可以拍照、從相簿選，或移除。" + (st === "ready"
+    ? "拍好或選好後會自動辨識（照片會送到 Claude），把讀到的內容填進下面空著的格子，請逐格核對。" + keep
+    : "辨識功能還沒開通，現在請先自己輸入。" + keep);
+}
+
+async function loadImg(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    await new Promise((ok, no) => {
+      img.onload = ok;
+      img.onerror = no;
+      img.src = url;
+    });
+    return img;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+const toJpeg = (canvas, q) => new Promise((ok) => canvas.toBlob(ok, "image/jpeg", q));
+const toBase64 = (blob) => new Promise((ok, no) => {
+  const fr = new FileReader();
+  fr.onload = () => ok(String(fr.result).split(",")[1] || "");
+  fr.onerror = no;
+  fr.readAsDataURL(blob);
+});
+
+/**
+ * 準備送去辨識的圖：JPEG，大小在 Claude 不會再縮小的範圍內（這樣它回報的名片位置才對得回來）。
+ * 回傳 { image（base64）, width, height }。
+ */
+async function imageForRecognize(blob) {
+  let img;
+  try {
+    img = await loadImg(blob);
+  } catch {
+    throw new G.UserError("這張照片手機讀不了，請重拍一張，或自己輸入。");
+  }
+  const [w, h] = CI.resized_size(img.naturalWidth, img.naturalHeight);
+  let out = blob;
+  if (w !== img.naturalWidth || h !== img.naturalHeight || blob.type !== "image/jpeg") {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    c.getContext("2d").drawImage(img, 0, 0, w, h);
+    out = await toJpeg(c, 0.85);
+    if (!out) throw new G.UserError("這張照片手機處理不了，請重拍一張，或自己輸入。");
+  }
+  return { image: await toBase64(out), width: w, height: h };
+}
+
+/** 照比例裁出名片的範圍。從手機給的原檔裁（畫質最好），長邊縮到 2000 以內。 */
+async function cropped(file, crop) {
+  const img = await loadImg(file);
+  const sx = Math.round(crop.x * img.naturalWidth);
+  const sy = Math.round(crop.y * img.naturalHeight);
+  const sw = Math.max(1, Math.round(crop.w * img.naturalWidth));
+  const sh = Math.max(1, Math.round(crop.h * img.naturalHeight));
+  const scale = Math.min(1, 2000 / Math.max(sw, sh));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(sw * scale));
+  c.height = Math.max(1, Math.round(sh * scale));
+  c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return toJpeg(c, 0.9);
+}
+
+/** 依辨識回報的名片位置自動裁切、轉正。裁不了就維持原圖。回傳說明文字（沒有動就是空字串）。 */
+async function applyCrop(side, card, sent) {
+  const ph = S.photos[side];
+  const plan = CI.crop_plan(card.box, card.rotate, { w: sent.width, h: sent.height });
+  if (!plan.crop && !plan.turns) return "";
+  try {
+    const base = plan.crop ? await cropped(ph.file, plan.crop) : ph.raw;
+    if (!base) return "";
+    const blob = await turned(base, plan.turns);
+    setPhoto(side, { file: ph.file, raw: ph.raw, orig: base, turns: plan.turns, blob, url: URL.createObjectURL(blob), auto: { orig: base, turns: plan.turns }, useAuto: true });
+    return `照片已自動${[plan.crop ? "裁切" : "", plan.turns ? "轉正" : ""].filter(Boolean).join("、")}。不滿意可以按照片下面的「用原圖」。`;
+  } catch {
+    return "";
+  }
+}
+
+const ID_OF = { name: "i-name", company: "i-company", department: "i-dept", title: "i-title", address: "i-addr", zip: "i-zip", englishName: "i-en", taxId: "i-tax", website: "i-web" };
+
+/** 把辨識結果填進表單（只填空著的格子），回傳要顯示的說明。 */
+function applyRecognized(side, card) {
+  const now = collect();
+  const plan = REC.fill_plan({ ...now, address: now.address.text, zip: now.address.zip }, card, side);
+  const lines = [];
+  const touched = new Set(); // 這次有填東西的欄位
+  for (const [key, value] of Object.entries(plan.set)) {
+    $(ID_OF[key]).value = value;
+    touched.add(key);
+  }
+  const addedPhones = [];
+  for (const p of plan.phones) {
+    const rows = [...$("phones").children].filter((r) => !r.querySelector("input").value.trim());
+    const row = rows.find((r) => r.querySelector("select").value === p.kind) || rows[0] || phoneRow(p.kind, "");
+    row.querySelector("select").value = p.kind;
+    row.querySelector("input").value = p.value;
+    addedPhones.push(row);
+  }
+  const addedEmails = [];
+  for (const e of plan.emails) {
+    const row = [...$("emails").children].find((r) => !r.querySelector("input").value.trim()) || emailRow("");
+    row.querySelector("input").value = e;
+    addedEmails.push(row);
+  }
+  if (addedPhones.length) touched.add("phones");
+  if (addedEmails.length) touched.add("emails");
+
+  // 照原本那套規則整理格式（和自己打字時一樣）
+  for (const row of $("phones").children) tidyPhone(row);
+  for (const row of $("emails").children) tidyEmail(row);
+  tidyAddress();
+  $("i-tax").value = cn_digits(toHalf($("i-tax").value)).trim();
+  for (const id of ["i-web", "i-en"]) $(id).value = toHalf($(id).value).trim();
+  if (["englishName", "taxId", "website"].some((k) => touched.has(k))) $("more").open = true;
+  $("n-name").textContent = "";
+  $("i-name").classList.remove("bad");
+  refreshThird();
+  refreshPreview();
+  saveDraft();
+
+  // 要請使用者特別核對的格子標黃色：Claude 自己說沒把握的，以及程式看到可能是簡體字或亂碼的
+  const doubt = new Set([...card.unsure, ...card.flags.map((f) => f.field)].filter((k) => touched.has(k)));
+  for (const key of doubt) {
+    if (key === "phones") for (const row of addedPhones) row.querySelector("input").classList.add("check");
+    else if (key === "emails") for (const row of addedEmails) row.querySelector("input").classList.add("check");
+    else $(ID_OF[key]).classList.add("check");
+  }
+
+  const n = touched.size;
+  lines.push(n ? ["ok", `填了 ${Object.keys(plan.set).length + addedPhones.length + addedEmails.length} 格，請逐格核對。`] : ["", "讀到的內容表單裡都已經有了，沒有更動。"]);
+  const sure = card.unsure.filter((k) => touched.has(k)).map((k) => REC.FIELD_LABEL[k]);
+  if (sure.length) lines.push(["warn", `辨識時沒把握，已標黃色，請特別核對：${sure.join("、")}`]);
+  const blank = card.unsure.filter((k) => !touched.has(k) && !plan.skipped.some((x) => x.field === k) && (k === "phones" ? !card.phones.length : k === "emails" ? !card.emails.length : !card[k])).map((k) => REC.FIELD_LABEL[k]);
+  if (blank.length) lines.push(["warn", `看不清楚，所以沒有填：${blank.join("、")}`]);
+  for (const f of card.flags) if (touched.has(f.field)) lines.push(["warn", f.text + "，請核對。"]);
+  if (plan.skipped.length) lines.push(["", `這些格子已經有內容，沒有更動：${plan.skipped.map((x) => `${x.label}（名片上讀到「${x.value}」）`).join("；")}`]);
+  if (card.other.length) {
+    lines.push(["", `名片上還有這些，沒有對應的格子：${card.other.join("；")}`, { text: "加到備註", run: () => {
+      const note = $("i-note");
+      note.value = [note.value.trim(), ...card.other.filter((o) => !note.value.includes(o))].filter(Boolean).join("\n");
+      $("more").open = true;
+      saveDraft();
+    } }]);
+  }
+  return lines;
+}
+
+function renderRec() {
+  const box = $("rec-lines");
+  box.innerHTML = "";
+  let any = false;
+  for (const [side, zh] of [["front", "正面"], ["back", "反面"]]) {
+    const lines = S.rec[side];
+    if (!lines) continue;
+    any = true;
+    const head = document.createElement("div");
+    head.className = "side";
+    head.textContent = `${zh}的辨識結果`;
+    box.append(head);
+    for (const [kind, text, action] of lines) {
+      const d = document.createElement("div");
+      d.className = "result-line " + kind;
+      d.textContent = text;
+      if (action) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "second";
+        b.textContent = action.text;
+        b.addEventListener("click", () => {
+          action.run();
+          b.disabled = true;
+          b.textContent = "已" + action.text;
+        });
+        d.append(b);
+      }
+      box.append(d);
+    }
+  }
+  $("rec-box").hidden = !any;
+  $("b-rec-again").hidden = !(S.photos.front || S.photos.back);
+}
+
+/** 辨識這一面的照片，把讀到的內容填進空著的格子，並自動裁切、轉正。後台還沒開通就什麼都不做。 */
+async function autoRecognize(side) {
+  const ph = S.photos[side];
+  if (!ph) return;
+  let st = await S.recog;
+  if (st === "unknown") {
+    checkRecognize(); // 剛才沒問到（多半是網路），再問一次
+    st = await S.recog;
+  }
+  if (st !== "ready") {
+    if (st === "unknown") {
+      S.rec[side] = [["warn", "現在連不上辨識功能（可能是網路不穩）。請先自己輸入，或稍後按「再辨識一次」。"]];
+      renderRec();
+    } else {
+      checkRecognize(); // 後台還沒開通：在背景再問一次，開通之後下一張照片就會自動辨識
+    }
+    return;
+  }
+  busy(`辨識名片${side === "front" ? "正面" : "反面"}中…`);
+  try {
+    const sent = await imageForRecognize(ph.raw);
+    const res = await G.recognize({ ...sent, side });
+    if (S.photos[side] !== ph) return; // 等的時候照片被換掉了
+    const card = REC.clean_result(res.result);
+    if (!card.found) {
+      S.rec[side] = [["warn", "這張照片裡沒有找到名片。請重拍一張（點照片格子），或自己輸入。"]];
+    } else {
+      const cropNote = await applyCrop(side, card, sent);
+      const lines = REC.has_content(card) ? applyRecognized(side, card) : [["warn", "名片上的字讀不出來。請重拍一張清楚一點的，或自己輸入。"]];
+      if (cropNote) lines.push(["", cropNote]);
+      S.rec[side] = lines;
+    }
+  } catch (e) {
+    S.rec[side] = [["bad", G.explain(e)]];
+    if (!G.loggedIn()) showError("m-form", e); // 登入失效：下面出現「重新登入」按鈕
+  } finally {
+    busy("");
+    renderRec();
+  }
+}
+
+async function recognizeAgain() {
+  for (const side of ["front", "back"]) if (S.photos[side]) await autoRecognize(side);
 }
 
 /** 把畫面上的內容收成一張「名片」資料（格式見 gcontact.build_person）。 */
@@ -550,9 +815,11 @@ function openForm(draft = null) {
     setPhoto("front", null);
     setPhoto("back", null);
   }
+  S.rec = { front: null, back: null };
+  renderRec();
   $("more").open = Boolean(d.englishName || d.taxId || d.website || d.note);
   for (const id of ["n-name", "n-addr", "m-form"]) $(id).textContent = "";
-  for (const el of document.querySelectorAll("#v-form .warn, #v-form .bad")) if (el.tagName !== "DIV") el.classList.remove("warn", "bad");
+  for (const el of document.querySelectorAll("#v-form .warn, #v-form .bad, #v-form .check")) if (el.tagName !== "DIV") el.classList.remove("warn", "bad", "check");
   S.warnSeen = "";
   renderLabelChips();
   refreshThird();
@@ -570,6 +837,8 @@ async function onSave() {
   msg.textContent = "";
   // 1. 每一格再整理一次（有些手機按存入時，最後那一格還沒失去焦點）
   const warns = [...[...$("phones").children].map(tidyPhone), ...[...$("emails").children].map(tidyEmail), tidyAddress()].filter(Boolean);
+  // 辨識時沒把握、使用者還沒動過的格子（黃色）也算
+  for (const el of document.querySelectorAll("#v-form input.check, #v-form textarea.check")) warns.push(`核對:${el.value}`);
   refreshThird();
   refreshPreview();
   saveDraft();
@@ -590,8 +859,8 @@ async function onSave() {
   if (sig && sig !== S.warnSeen) {
     S.warnSeen = sig;
     msg.className = "msg warn";
-    msg.textContent = `有 ${warns.length} 格標了黃色（程式看不懂的內容），請看一下。確定沒問題的話，再按一次「存入聯絡人」，會照您寫的原樣存。`;
-    document.querySelector("#v-form input.warn")?.scrollIntoView({ block: "center" });
+    msg.textContent = `有 ${warns.length} 格標了黃色（程式看不懂，或辨識時沒把握的內容），請看一下。確定沒問題的話，再按一次「存入聯絡人」，會照目前的內容存。`;
+    document.querySelector("#v-form input.warn, #v-form input.check")?.scrollIntoView({ block: "center" });
     return;
   }
   const card = collect();
@@ -965,6 +1234,11 @@ async function main() {
   });
   $("r-front").addEventListener("click", () => rotatePhoto("front"));
   $("r-back").addEventListener("click", () => rotatePhoto("back"));
+  $("a-front").addEventListener("click", () => toggleAuto("front"));
+  $("a-back").addEventListener("click", () => toggleAuto("back"));
+  $("b-rec-again").addEventListener("click", recognizeAgain);
+  $("v-form").addEventListener("input", (e) => e.target.classList?.remove("check")); // 改過的格子就不再標「請核對」
+  renderPhotoHint("");
   $("p-front").addEventListener("click", () => openPhotoMenu("front"));
   $("p-back").addEventListener("click", () => openPhotoMenu("back"));
   $("pm-camera").addEventListener("click", () => {
@@ -978,6 +1252,8 @@ async function main() {
   $("pm-remove").addEventListener("click", () => {
     $("photo-menu").hidden = true;
     setPhoto($("photo-menu").dataset.side, null);
+    S.rec[$("photo-menu").dataset.side] = null;
+    renderRec();
   });
   $("pm-cancel").addEventListener("click", () => ($("photo-menu").hidden = true));
   for (const side of ["front", "back"]) {
