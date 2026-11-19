@@ -32,18 +32,38 @@ const S = {
 
 // ---------- 小工具 ----------
 
+// 這支手機上記住的東西（姓名模式、上次用的類別、還沒存的草稿）是「跟著帳號」分開記的：
+// 同一支手機換另一個帳號登入，不會看到前一個人的模式和草稿。
+let ACCT = "";
+const storeKey = () => (ACCT ? `${LS_KEY}/${ACCT}` : LS_KEY);
+
 function store() {
   try {
-    return JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+    return JSON.parse(localStorage.getItem(storeKey()) || "{}");
   } catch {
     return {};
   }
 }
 function keep(patch) {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify({ ...store(), ...patch }));
+    localStorage.setItem(storeKey(), JSON.stringify({ ...store(), ...patch }));
   } catch {
     /* 存不了（例如無痕模式）不影響使用，只是不會記住 */
+  }
+}
+
+/** 登入後呼叫：之後記的東西都歸這個帳號。舊版記在「整支手機共用」的設定，搬給第一個登入的帳號。 */
+function useAccount(email) {
+  ACCT = email || "";
+  if (!ACCT) return;
+  try {
+    const old = localStorage.getItem(LS_KEY);
+    if (old !== null) {
+      if (localStorage.getItem(storeKey()) === null) localStorage.setItem(storeKey(), old);
+      localStorage.removeItem(LS_KEY);
+    }
+  } catch {
+    /* 搬不了就當成第一次使用 */
   }
 }
 
@@ -115,6 +135,7 @@ async function afterLogin() {
   } finally {
     busy("");
   }
+  useAccount(G.account());
   S.mode = store().mode || "";
   if (!S.mode) view("mode");
   else goHome();
@@ -130,7 +151,11 @@ function showLogin() {
 }
 
 function goHome() {
-  $("home-acct").textContent = "登入帳號：" + G.account() + "　｜　" + (S.mode === "category" ? "類別模式" : "一般模式") + "　｜　版本：" + CONFIG.VERSION;
+  $("home-acct").textContent = "登入帳號：" + G.account() + "　｜　版本：" + CONFIG.VERSION;
+  $("home-mode-name").textContent = S.mode === "category" ? "類別模式" : "一般模式";
+  $("home-mode-desc").textContent = S.mode === "category"
+    ? "姓名會存成「類別-姓名_公司或專長」，例如：廠商-王小明_大順廚具，並掛上和類別同名的標籤。"
+    : "只存姓名，例如：王小明；標籤可以自己點選。";
   const d = store().draft;
   const has = d && (d.name || d.company || (d.phones || []).some((p) => p.value) || (d.emails || []).some(Boolean));
   $("draft-box").hidden = !has;
@@ -905,11 +930,14 @@ async function main() {
   $("b-home").addEventListener("click", goHome);
   $("b-settings").addEventListener("click", () => {
     $("set-acct").textContent = G.account();
+    $("set-mode-now").textContent = S.mode === "category" ? "類別模式" : "一般模式";
     for (const b of document.querySelectorAll("[data-setmode]")) b.classList.toggle("second", b.dataset.setmode !== S.mode);
     view("settings");
   });
+  $("b-home-settings").addEventListener("click", () => $("b-settings").click());
   $("b-logout").addEventListener("click", () => {
     G.logout();
+    ACCT = "";
     showLogin();
   });
 

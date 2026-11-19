@@ -57,7 +57,12 @@
         <button class="plain" id="b-discard">丟掉，不要了</button>
       </div>
     </div>
-    <p class="sub" id="home-acct" style="margin-top:18px"></p>
+    <div class="card" style="margin-top:18px">
+      <h3>目前的姓名模式：<span id="home-mode-name"></span></h3>
+      <p class="sub" id="home-mode-desc"></p>
+      <p class="sub">這個設定會記在這支手機上，跟著您的帳號，不用每次選。要改的話：<button class="plain" id="b-home-settings" style="padding:0;min-height:0">到「設定」更改</button></p>
+    </div>
+    <p class="sub" id="home-acct"></p>
   </section>
 
   <!-- 表單 -->
@@ -209,6 +214,7 @@
     <h2>設定</h2>
     <div class="card">
       <h3>姓名怎麼存</h3>
+      <p class="sub">目前：<strong id="set-mode-now"></strong>。這個設定記在這支手機上、跟著您的帳號。換模式時，還沒存完的那一張草稿會清掉。</p>
       <div class="stack">
         <button class="second choice" data-setmode="category">類別模式<small>選一個標籤當類別：類別-姓名_公司或專長</small></button>
         <button class="second choice" data-setmode="plain">一般模式<small>只存姓名，標籤點選零到多個</small></button>
