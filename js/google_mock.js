@@ -39,6 +39,12 @@ export function loggedIn() {
 export function logout() {
   on = false;
 }
+export function lastAccount() {
+  return "";
+}
+export function restore() {
+  return "";
+}
 export async function login() {
   await sleep(300);
   on = true;

@@ -116,6 +116,15 @@ async function afterLogin() {
   else goHome();
 }
 
+/** 顯示登入頁。記得上次的帳號時，按鈕直接寫明用哪個帳號，另外給「用別的帳號」。 */
+function showLogin() {
+  const last = G.lastAccount();
+  $("b-login").textContent = last ? `登入（${last}）` : "用公司帳號登入";
+  $("b-login-other").hidden = !last;
+  $("m-login").textContent = "";
+  view("login");
+}
+
 function goHome() {
   $("home-acct").textContent = "登入帳號：" + G.account() + "　｜　" + (S.mode === "category" ? "類別模式" : "一般模式") + "　｜　版本：" + CONFIG.VERSION;
   const d = store().draft;
@@ -676,20 +685,23 @@ async function main() {
   $("demo-banner").hidden = !demo;
   $("set-ver").textContent = $("login-ver").textContent = CONFIG.VERSION + (demo ? "（示範）" : "");
 
-  $("b-login").addEventListener("click", async () => {
+  const doLogin = async (other) => {
     const msg = $("m-login");
     try {
-      const p = G.login(); // 直接在點擊裡呼叫
+      const p = G.login({ other }); // 直接在點擊裡呼叫
       msg.className = "msg";
       msg.textContent = "已開啟登入視窗，請在視窗裡完成登入…";
       await p;
       msg.textContent = "";
       await afterLogin();
     } catch (e) {
+      showLogin();
       showError("m-login", e);
-      if (!G.loggedIn()) msg.querySelector("button")?.remove(); // 登入頁本身就有登入按鈕
+      msg.querySelector("button")?.remove(); // 登入頁本身就有登入按鈕
     }
-  });
+  };
+  $("b-login").addEventListener("click", () => doLogin(false));
+  $("b-login-other").addEventListener("click", () => doLogin(true));
 
   for (const b of document.querySelectorAll("[data-mode]")) {
     b.addEventListener("click", () => {
@@ -721,7 +733,7 @@ async function main() {
   });
   $("b-logout").addEventListener("click", () => {
     G.logout();
-    view("login");
+    showLogin();
   });
 
   $("b-new-label").addEventListener("click", addNewLabel);
@@ -795,8 +807,17 @@ async function main() {
   if (demo) {
     await G.login();
     await afterLogin();
+  } else if (G.restore()) {
+    // 一小時內關掉再開：用手機裡暫存的通行證，不用重新登入
+    try {
+      await afterLogin();
+    } catch (e) {
+      showLogin();
+      showError("m-login", e);
+      $("m-login").querySelector("button")?.remove();
+    }
   } else {
-    view("login");
+    showLogin();
   }
 }
 

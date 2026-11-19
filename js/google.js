@@ -1,5 +1,10 @@
 // 和 Google 連線的部分：登入、聯絡人（People API）、雲端硬碟（Drive API）、後台。
-// 登入的通行證只放在記憶體，關掉網頁就沒了；不存到手機裡。
+//
+// 登入的通行證（使用者 2026-11-19 選的做法）：
+// - Google 給的通行證最長一小時。它會暫存在這支手機的瀏覽器儲存空間裡，所以一小時內關掉 App 再開不用重新登入。
+//   過期、登出、或 Google 說它失效時就清掉。通行證不會寫進任何紀錄，也不會傳到 Google 以外的地方（後台驗證身分時除外）。
+// - 另外記住上次登入的 Email（只有 Email，不是密碼），下次按登入就不用再選帳號。
+// 已告知使用者的風險：同一個網址（github.io）底下他其他專案的網頁，理論上也讀得到暫存的通行證。
 import { CONFIG } from "../config.js";
 
 const PEOPLE = "https://people.googleapis.com/v1/";
@@ -13,6 +18,25 @@ const SEARCH_FIELDS = "names,phoneNumbers,emailAddresses,organizations,membershi
 
 /** 給使用者看的錯誤（訊息本身就是白話）。 */
 export class UserError extends Error {}
+
+const AUTH_KEY = "junpin-card-auth"; // { token, exp, email, client }
+const HINT_KEY = "junpin-card-hint"; // 上次登入的 Email
+
+function lsGet(k) {
+  try {
+    return JSON.parse(localStorage.getItem(k) || "null");
+  } catch {
+    return null;
+  }
+}
+function lsSet(k, v) {
+  try {
+    if (v === null) localStorage.removeItem(k);
+    else localStorage.setItem(k, JSON.stringify(v));
+  } catch {
+    /* 存不了（例如無痕模式）就當成沒有暫存，只是每次都要登入 */
+  }
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const state = { token: "", tokenExp: 0, email: "", tokenClient: null, pending: null, folderId: "", warmed: false };
@@ -36,18 +60,49 @@ export function loggedIn() {
   return Boolean(state.token) && Date.now() < state.tokenExp;
 }
 
+/** 上次登入的 Email（沒有就是空字串）。 */
+export function lastAccount() {
+  return lsGet(HINT_KEY) || "";
+}
+
+/**
+ * 開啟 App 時呼叫：手機裡暫存的通行證還沒過期就拿來用，回傳 Email；沒有或過期了回傳空字串。
+ * 這裡不連網路；通行證是不是真的還有效，等第一次向 Google 要資料時就知道（失效會被清掉、回到登入頁）。
+ */
+export function restore() {
+  const a = lsGet(AUTH_KEY);
+  if (a?.token && a.client === CONFIG.GOOGLE_CLIENT_ID && Number(a.exp) > Date.now() + 30000) {
+    state.token = a.token;
+    state.tokenExp = Number(a.exp);
+    state.email = a.email || "";
+    state.warmed = false;
+    return state.email || "（已登入）";
+  }
+  lsSet(AUTH_KEY, null);
+  return "";
+}
+
+function forgetToken() {
+  state.token = "";
+  state.tokenExp = 0;
+  lsSet(AUTH_KEY, null);
+}
+
+/** 登出：請 Google 作廢這個 App 的授權，並清掉手機裡暫存的通行證和記住的帳號。 */
 export function logout() {
   if (state.token && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(state.token, () => {});
-  state.token = "";
+  forgetToken();
   state.email = "";
-  state.tokenExp = 0;
+  lsSet(HINT_KEY, null);
 }
 
 /**
  * 登入。一定要在按鈕的點擊動作裡直接呼叫（中間不可以先等別的事），登入視窗才不會被瀏覽器擋掉。
  * 成功回傳 Email；失敗丟出 UserError。
+ * 記得上次的帳號時，直接用那個帳號登入，不再跳出選帳號的畫面（官方文件：prompt 給空字串＋login_hint）。
+ * other=true：改用別的帳號登入，會跳出選帳號的畫面。
  */
-export function login() {
+export function login({ other = false } = {}) {
   return new Promise((resolve, reject) => {
     if (!window.google?.accounts?.oauth2) {
       reject(new UserError("Google 登入元件還沒載入好，請等幾秒再按一次（或確認網路）。"));
@@ -68,7 +123,8 @@ export function login() {
       });
     }
     state.pending = { resolve, reject };
-    state.tokenClient.requestAccessToken();
+    const hint = other ? "" : lastAccount();
+    state.tokenClient.requestAccessToken(hint ? { prompt: "", login_hint: hint } : { prompt: "select_account" });
   });
 }
 
@@ -91,11 +147,13 @@ async function onToken(resp) {
       throw new UserError(`這不是公司帳號（${email}）。請改用 ${CONFIG.WORKSPACE_DOMAIN} 的帳號登入。`);
     }
     state.email = me.email;
+    lsSet(AUTH_KEY, { token: state.token, exp: state.tokenExp, email: me.email, client: CONFIG.GOOGLE_CLIENT_ID });
+    lsSet(HINT_KEY, me.email);
     state.warmed = false;
     warmup().catch(() => {});
     pending?.resolve(me.email);
   } catch (e) {
-    state.token = "";
+    forgetToken();
     pending?.reject(e);
   }
 }
@@ -127,7 +185,7 @@ async function api(method, url, { params = {}, body, rawBody, headers = {} } = {
     if (!res.ok) {
       const err = new Error(json?.error?.message || text.slice(0, 200) || res.statusText);
       err.status = res.status;
-      if (res.status === 401) state.token = "";
+      if (res.status === 401) forgetToken();
       throw err;
     }
     return json;
