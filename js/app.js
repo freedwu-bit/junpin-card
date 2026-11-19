@@ -3,6 +3,7 @@
 // 規則都在 rules.js、address.js、gcontact.js、dedupe.js（有自動測試）；這個檔只管畫面。
 // 「辨識」還沒接上（等 Claude 額度），現在是手動輸入。
 import { CONFIG } from "../config.js";
+import { cn_digits, to_half } from "./cnnum.js";
 import * as D from "./dedupe.js";
 import * as GC from "./gcontact.js";
 import * as L from "./labels.js";
@@ -81,10 +82,7 @@ function showError(id, e) {
   }
 }
 
-/** 全形數字與符號轉半形（名片辨識、手機輸入法常見）。 */
-function toHalf(s) {
-  return (s || "").replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/　/g, " ");
-}
+const toHalf = to_half; // 全形數字與符號轉半形（名片辨識、手機輸入法常見）
 
 // ---------- 登入與開場 ----------
 
@@ -161,6 +159,7 @@ function tidyPhone(row) {
   const raw = toHalf(input.value).trim();
   input.classList.remove("warn");
   note.textContent = "";
+  note.className = "note";
   if (!raw) {
     input.value = "";
     return "";
@@ -168,15 +167,19 @@ function tidyPhone(row) {
   const r = GC.prepare_phone(raw, sel.value);
   if (r.ok) {
     input.value = r.value;
+    const says = [];
     const kind = { mobile: "手機", work: "公司", workFax: "傳真" }[r.type];
     if (kind && kind !== sel.value) {
       sel.value = kind;
-      note.textContent = `09 開頭是手機，已改成「${kind}」。`;
+      says.push(`09 開頭是手機，已改成「${kind}」。`);
     }
+    if (r.note) says.push(r.note + "，請看一下對不對。");
+    note.textContent = says.join("");
     return "";
   }
   input.value = raw;
   input.classList.add("warn");
+  note.className = "note warn";
   note.textContent = `這支號碼程式看不懂（${r.reason}），會照您寫的原樣存。請看一下有沒有打錯。`;
   return `電話:${raw}`;
 }
@@ -224,12 +227,16 @@ function tidyAddress() {
     input.value = "";
     return "";
   }
+  note.className = "note";
+  $("i-zip").value = cn_digits(toHalf($("i-zip").value)).trim();
   const a = GC.prepare_address(raw, $("i-zip").value);
   if (a.ok) {
     input.value = a.text;
     if (a.zip && !$("i-zip").value.trim()) $("i-zip").value = a.zip;
+    if (a.note) note.textContent = a.note + "，請看一下對不對。";
     return "";
   }
+  note.className = "note warn";
   input.value = raw;
   // 英文、國外地址本來就不整理，不算問題，不用標黃色
   if (a.reason === "不是中文地址" || a.reason.startsWith("國家不是台灣")) return "";
@@ -371,6 +378,14 @@ function setPhoto(side, photo) {
   tile.style.backgroundImage = photo ? `url(${photo.url})` : "";
   tile.textContent = photo ? (side === "front" ? "正面（點一下重拍）" : "反面（點一下重拍）") : side === "front" ? "＋拍正面" : "＋拍反面（選填）";
   $("r-" + side).hidden = !photo;
+  tile.classList.remove("tall");
+  if (photo) {
+    const im = new Image();
+    im.onload = () => {
+      if (S.photos[side] === photo) tile.classList.toggle("tall", im.naturalHeight > im.naturalWidth);
+    };
+    im.src = photo.url;
+  }
 }
 
 /** 把原圖順時針轉 turns 次 90°。每次都從原圖重畫，轉幾次畫質都不會變差。 */
@@ -758,7 +773,11 @@ async function main() {
       saveDraft();
     });
   }
-  for (const id of ["i-tax", "i-web", "i-en"]) $(id).addEventListener("blur", () => ($(id).value = toHalf($(id).value).trim()));
+  for (const id of ["i-web", "i-en"]) $(id).addEventListener("blur", () => ($(id).value = toHalf($(id).value).trim()));
+  $("i-tax").addEventListener("blur", () => {
+    $("i-tax").value = cn_digits(toHalf($("i-tax").value)).trim();
+    saveDraft();
+  });
   $("b-add-phone").addEventListener("click", () => phoneRow("手機", "").querySelector("input").focus());
   $("b-add-email").addEventListener("click", () => emailRow("").querySelector("input").focus());
 

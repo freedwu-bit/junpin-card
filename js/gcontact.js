@@ -3,6 +3,7 @@
 // - 地址安全寫法（規則文件 7.3）：clean_fv()、safe()、is_safe() 是 ~/通訊錄整理/程式/41_地址修正.py 的移植。
 // - build_person() 是名片 App 新寫的：照規則文件第 12 節把各欄位組起來。
 import { normalize_address } from "./address.js";
+import { cn_address_numbers, cn_digits, to_half } from "./cnnum.js";
 import * as py from "./pyre.js";
 import * as R from "./rules.js";
 
@@ -51,26 +52,38 @@ export function new_address(line, postalCode = "", type = "work") {
 }
 
 /**
- * 整理一支電話。回傳 { value, type, ok, reason }：
+ * 整理一支電話。回傳 { value, type, ok, reason, note }：
  * ok=true 表示已照規則整理好；ok=false 表示看不懂，value 保持原樣，畫面要標出來請使用者看（規則文件 5.4）。
  * kind：名片上這支電話是「手機」「公司」還是「傳真」。
  */
 export function prepare_phone(value, kind = "公司") {
-  const r = R.normalize_phone(value, TYPE_TO_GOOGLE[kind] || "work", "公司");
-  if (r.status === "ok") return { value: r.new_value, type: TYPE_TO_GOOGLE[r.new_type], ok: true, reason: "" };
-  return { value: value || "", type: TYPE_TO_GOOGLE[kind] || "work", ok: false, reason: r.reason };
+  // 先把全形轉半形、國字數字轉阿拉伯數字（使用者 2026-11-19 決定），再照規則整理
+  const half = py.strip(to_half(value || ""));
+  const conv = cn_digits(half);
+  const r = R.normalize_phone(conv, TYPE_TO_GOOGLE[kind] || "work", "公司");
+  if (r.status === "ok") {
+    return { value: r.new_value, type: TYPE_TO_GOOGLE[r.new_type], ok: true, reason: "", note: conv !== half ? "國字數字已轉成阿拉伯數字" : "" };
+  }
+  // 轉了還是看不懂：不硬改，保持名片上的寫法
+  return { value: half, type: TYPE_TO_GOOGLE[kind] || "work", ok: false, reason: r.reason, note: "" };
 }
 
 /**
- * 整理一個地址。回傳 { text, zip, ok, reason, suggest }：
+ * 整理一個地址。回傳 { text, zip, ok, reason, suggest, note }：
  * ok=false 表示看不懂或不是中文地址，text 保持原樣，畫面要標出來請使用者看（規則文件 7.1）。
+ * 國字寫的門牌（號、樓、巷、弄、之幾）會先轉成阿拉伯數字；「幾段」維持國字（使用者 2026-11-19 決定）。
  */
 export function prepare_address(text, zip = "") {
-  const sc = R.simplified_chars(text || "");
-  const garbled = R.looks_garbled(text || "") || (sc.length ? "含簡體字" : "");
-  const r = normalize_address(text, zip, "", garbled);
-  if (r.status === "ok") return { text: r.new, zip: r.zip || "", ok: true, reason: "", suggest: "" };
-  return { text: py.strip(text || ""), zip: py.sub(String.raw`\D`, "", zip || ""), ok: false, reason: r.reason, suggest: r.suggest };
+  const half = py.strip(to_half(text || ""));
+  const conv = cn_address_numbers(half);
+  const zipConv = cn_digits(to_half(zip || ""));
+  const sc = R.simplified_chars(conv);
+  const garbled = R.looks_garbled(conv) || (sc.length ? "含簡體字" : "");
+  const r = normalize_address(conv, zipConv, "", garbled);
+  if (r.status === "ok") {
+    return { text: r.new, zip: r.zip || "", ok: true, reason: "", suggest: "", note: conv !== half ? "國字數字已轉成阿拉伯數字" : "" };
+  }
+  return { text: half, zip: py.sub(String.raw`\D`, "", zipConv), ok: false, reason: r.reason, suggest: r.suggest, note: "" };
 }
 
 /**
@@ -126,7 +139,8 @@ export function build_person(card) {
   if (Object.keys(org).length) body.organizations = [org];
 
   if (py.strip(card.englishName || "")) body.nicknames = [{ value: py.strip(card.englishName) }];
-  if (py.strip(card.taxId || "")) body.userDefined = [{ key: "統編", value: py.strip(card.taxId) }];
+  const taxId = py.strip(cn_digits(to_half(card.taxId || "")));
+  if (taxId) body.userDefined = [{ key: "統編", value: taxId }];
   const urls = [];
   if (py.strip(card.website || "")) urls.push({ value: py.strip(card.website), type: "work" });
   // 名片照片的連結放在網站欄（使用者 2026-11-19 決定）：萬一辨識錯了沒發現，點連結就能看原本的名片。
