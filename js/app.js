@@ -414,7 +414,7 @@ function setPhoto(side, photo) {
   const tile = $("p-" + side);
   tile.classList.toggle("has", Boolean(photo));
   tile.style.backgroundImage = photo ? `url(${photo.url})` : "";
-  tile.textContent = photo ? (side === "front" ? "正面（點一下重拍）" : "反面（點一下重拍）") : side === "front" ? "＋拍正面" : "＋拍反面（選填）";
+  tile.textContent = photo ? (side === "front" ? "正面（點一下更換）" : "反面（點一下更換）") : side === "front" ? "＋正面" : "＋反面（選填）";
   $("r-" + side).hidden = !photo;
   tile.classList.remove("tall");
   if (photo) {
@@ -483,8 +483,22 @@ async function shrink(file) {
   return file;
 }
 
-async function onPhotoPicked(side) {
-  const input = $("f-" + side);
+/** 點照片格子：出現小選單（拍照／從相簿選／移除）。 */
+function openPhotoMenu(side) {
+  const menu = $("photo-menu");
+  if (!menu.hidden && menu.dataset.side === side) {
+    menu.hidden = true; // 再點一次同一格就收起來
+    return;
+  }
+  menu.dataset.side = side;
+  $("photo-menu-title").textContent = side === "front" ? "名片正面" : "名片反面";
+  $("pm-remove").hidden = !S.photos[side];
+  menu.hidden = false;
+}
+
+/** inputId：這次是從哪一個入口來的（f-正反面＝相機；f-正反面-pick＝相簿）。 */
+async function onPhotoPicked(side, inputId) {
+  const input = $(inputId);
   const file = input.files[0];
   input.value = "";
   if (!file) return;
@@ -875,9 +889,12 @@ async function writeNew(card, msgId) {
   finish("存好了", lines);
 }
 
-function startCard(withCamera) {
+/** source："camera"（直接開相機）、"gallery"（從相簿選）、""（不拍照）。 */
+function startCard(source) {
   openForm(null);
-  if (withCamera) $("f-front").click(); // 要在點擊動作裡直接開相機
+  $("photo-menu").hidden = true;
+  if (source === "camera") $("f-front").click(); // 要在點擊動作裡直接開，才不會被瀏覽器擋掉
+  if (source === "gallery") $("f-front-pick").click();
 }
 
 // ---------- 啟動 ----------
@@ -920,8 +937,9 @@ async function main() {
     });
   }
 
-  $("b-shoot").addEventListener("click", () => startCard(true));
-  $("b-manual").addEventListener("click", () => startCard(false));
+  $("b-shoot").addEventListener("click", () => startCard("camera"));
+  $("b-pick").addEventListener("click", () => startCard("gallery"));
+  $("b-manual").addEventListener("click", () => startCard(""));
   $("b-resume").addEventListener("click", () => openForm(store().draft));
   $("b-discard").addEventListener("click", () => {
     keep({ draft: null });
@@ -947,10 +965,25 @@ async function main() {
   });
   $("r-front").addEventListener("click", () => rotatePhoto("front"));
   $("r-back").addEventListener("click", () => rotatePhoto("back"));
-  $("p-front").addEventListener("click", () => $("f-front").click());
-  $("p-back").addEventListener("click", () => $("f-back").click());
-  $("f-front").addEventListener("change", () => onPhotoPicked("front"));
-  $("f-back").addEventListener("change", () => onPhotoPicked("back"));
+  $("p-front").addEventListener("click", () => openPhotoMenu("front"));
+  $("p-back").addEventListener("click", () => openPhotoMenu("back"));
+  $("pm-camera").addEventListener("click", () => {
+    $("photo-menu").hidden = true;
+    $("f-" + $("photo-menu").dataset.side).click();
+  });
+  $("pm-gallery").addEventListener("click", () => {
+    $("photo-menu").hidden = true;
+    $("f-" + $("photo-menu").dataset.side + "-pick").click();
+  });
+  $("pm-remove").addEventListener("click", () => {
+    $("photo-menu").hidden = true;
+    setPhoto($("photo-menu").dataset.side, null);
+  });
+  $("pm-cancel").addEventListener("click", () => ($("photo-menu").hidden = true));
+  for (const side of ["front", "back"]) {
+    $("f-" + side).addEventListener("change", () => onPhotoPicked(side, "f-" + side));
+    $("f-" + side + "-pick").addEventListener("change", () => onPhotoPicked(side, "f-" + side + "-pick"));
+  }
 
   $("i-cat").addEventListener("change", () => {
     if ($("i-cat").value === "__new__") {
@@ -1008,7 +1041,7 @@ async function main() {
   $("b-upd-go").addEventListener("click", applyUpdate);
   $("b-upd-back").addEventListener("click", () => view("dup"));
   $("b-undo").addEventListener("click", undoUpdate);
-  $("b-next").addEventListener("click", () => startCard(true));
+  $("b-next").addEventListener("click", () => startCard("camera"));
   $("b-done-home").addEventListener("click", goHome);
 
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

@@ -45,6 +45,7 @@ input.bad, select.bad { border-color:var(--bad); background:#fff1ef; }
 .photo { flex:1; aspect-ratio: 16 / 10; border:1.5px dashed #b8c0cc; border-radius:10px; background:#fafbfc center/contain no-repeat; color:var(--mute); font-size:15px; font-weight:500; min-height:0; display:flex; align-items:flex-end; justify-content:center; padding:6px; }
 .photo.has { border-style:solid; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.9), 0 0 6px rgba(0,0,0,.7); background-color:#2a3342; }
 .photo.tall { aspect-ratio: 10 / 16; }
+#photo-menu { margin:10px 0 0; background:#f7f9fc; }
 .photos.turn { margin-top:8px; } .photos.turn > div { flex:1; } .photos.turn button { min-height:40px; font-size:15px; font-weight:500; }
 
 .preview { margin-top:12px; padding:10px 12px; border-radius:8px; background:#eef2f8; font-size:15px; overflow-wrap:anywhere; }

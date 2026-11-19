@@ -49,6 +49,7 @@
   <section class="view" id="v-home" hidden>
     <div class="stack" style="margin-top:8px">
       <button class="big" id="b-shoot">拍名片</button>
+      <button class="second" id="b-pick">從相簿選照片</button>
       <button class="second" id="b-manual">不拍照，直接輸入</button>
       <div class="card" id="draft-box" hidden>
         <h3>上次有一張還沒存</h3>
@@ -70,14 +71,23 @@
     <div class="card">
       <h3>名片照片</h3>
       <div class="photos">
-        <button type="button" class="photo" id="p-front">＋拍正面</button>
-        <button type="button" class="photo" id="p-back">＋拍反面（選填）</button>
+        <button type="button" class="photo" id="p-front">＋正面</button>
+        <button type="button" class="photo" id="p-back">＋反面（選填）</button>
+      </div>
+      <div class="card" id="photo-menu" hidden>
+        <h3 id="photo-menu-title"></h3>
+        <div class="stack">
+          <button type="button" class="second" id="pm-camera">拍照</button>
+          <button type="button" class="second" id="pm-gallery">從相簿選</button>
+          <button type="button" class="second" id="pm-remove">移除這張照片</button>
+          <button type="button" class="plain" id="pm-cancel">取消</button>
+        </div>
       </div>
       <div class="photos turn">
         <div><button type="button" class="second" id="r-front" hidden>正面轉 90°</button></div>
         <div><button type="button" class="second" id="r-back" hidden>反面轉 90°</button></div>
       </div>
-      <p class="sub" style="margin-top:8px">辨識功能還沒接上，現在請先自己輸入。照片會在存入時存到您的雲端硬碟，並在聯絡人的「網站」欄留一個連結，之後點連結就能看原本的名片。</p>
+      <p class="sub" style="margin-top:8px">點格子可以拍照、從相簿選，或移除。辨識功能還沒接上，現在請先自己輸入。照片會在存入時存到您的雲端硬碟，並在聯絡人的「網站」欄留一個連結，之後點連結就能看原本的名片。</p>
     </div>
 
     <div class="card">
@@ -233,6 +243,9 @@
 <div id="busy" hidden><div class="box"><div class="spin"></div><div id="busy-text"></div></div></div>
 <input type="file" id="f-front" accept="image/*" capture="environment" hidden>
 <input type="file" id="f-back" accept="image/*" capture="environment" hidden>
+<!-- 沒有 capture：讓手機跳出選照片的畫面（相簿） -->
+<input type="file" id="f-front-pick" accept="image/*" hidden>
+<input type="file" id="f-back-pick" accept="image/*" hidden>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script type="module" src="js/app.js"></script>
