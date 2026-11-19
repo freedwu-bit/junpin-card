@@ -5,6 +5,7 @@
 import { CONFIG } from "../config.js";
 import * as D from "./dedupe.js";
 import * as GC from "./gcontact.js";
+import * as L from "./labels.js";
 import * as R from "./rules.js";
 
 const demo = new URLSearchParams(location.search).has("demo");
@@ -16,10 +17,10 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 let G; // 連 Google 的那一層（正式：google.js；示範模式：google_mock.js）
 const S = {
   mode: "", // "category"（類別模式）或 "plain"（一般模式）
-  labels: [], // 使用者現有的標籤
-  photos: { front: null, back: null }, // { blob, url }
+  labels: [], // 使用者的標籤：{ resourceName, name }；剛在這裡新增、還沒存進 Google 的，resourceName 是空的
+  photos: { front: null, back: null }, // { orig（原圖）, turns（順時針轉了幾次 90°）, blob（要存的圖）, url }
   thirdTouched: false, // 使用者自己改過第三段，就不再自動帶入建議
-  plainLabels: new Set(), // 一般模式點選的標籤
+  plainLabels: new Set(), // 一般模式點選的標籤（存名稱）
   warnSeen: "", // 已經提醒過的黃色警告（同樣的警告不重複擋）
   pendingCard: null, // 查重畫面上等待決定的那一張
 };
@@ -88,7 +89,21 @@ function toHalf(s) {
 // ---------- 登入與開場 ----------
 
 async function loadLabels() {
-  S.labels = await G.listLabels();
+  const pending = S.labels.filter((l) => !l.resourceName); // 剛新增、還沒存進 Google 的先留著
+  const got = await G.listLabels();
+  S.labels = [...got, ...pending.filter((p) => !got.some((g) => g.name === p.name))];
+  L.learn_categories(S.labels);
+}
+
+/** 確保清單裡有這個名稱的標籤（沒有就先記成「待新增」，存入聯絡人時才真的建立）。 */
+function ensureLabel(name) {
+  let l = S.labels.find((x) => x.name === name);
+  if (!l) {
+    l = { resourceName: "", name };
+    S.labels.push(l);
+    L.learn_categories([l]);
+  }
+  return l;
 }
 
 async function afterLogin() {
@@ -275,7 +290,7 @@ function wholeName() {
 function refreshPreview() {
   const name = $("i-name").value.trim();
   if (S.mode === "plain") {
-    const picked = S.labels.filter((l) => S.plainLabels.has(l.resourceName)).map((l) => l.name);
+    const picked = [...S.plainLabels];
     $("pv").innerHTML = `會存成：<strong>${esc(name || "（還沒填姓名）")}</strong><br>標籤：${esc(picked.join("、") || "不掛標籤")}`;
     return;
   }
@@ -288,22 +303,64 @@ function refreshPreview() {
 function renderLabelChips() {
   const box = $("label-chips");
   box.innerHTML = "";
-  const usable = S.labels.filter((l) => !l.name.startsWith("_"));
-  if (!usable.length) box.innerHTML = '<span class="sub">您的通訊錄還沒有自己建的標籤。</span>';
-  for (const l of usable) {
+  for (const l of L.order_labels(S.labels)) {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "chip" + (S.plainLabels.has(l.resourceName) ? " on" : "");
-    b.textContent = l.name;
+    b.className = "chip" + (S.plainLabels.has(l.name) ? " on" : "");
+    b.textContent = l.name + (l.resourceName ? "" : "（新）");
     b.addEventListener("click", () => {
-      if (S.plainLabels.has(l.resourceName)) S.plainLabels.delete(l.resourceName);
-      else S.plainLabels.add(l.resourceName);
+      if (S.plainLabels.has(l.name)) S.plainLabels.delete(l.name);
+      else S.plainLabels.add(l.name);
       b.classList.toggle("on");
       refreshPreview();
       saveDraft();
     });
     box.append(b);
   }
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "chip";
+  add.textContent = "＋ 新增標籤";
+  add.addEventListener("click", () => showNewLabel(true));
+  box.append(add);
+}
+
+/** 類別模式的下拉選單：選項是使用者自己的標籤，最後一項是「新增標籤」。 */
+function renderCategoryOptions(selected) {
+  const opts = L.order_labels(S.labels).map((l) => `<option value="${esc(l.name)}">${esc(l.name)}${l.resourceName ? "" : "（新）"}</option>`);
+  $("i-cat").innerHTML = '<option value="">（請選擇）</option>' + opts.join("") + '<option value="__new__">＋ 新增標籤…</option>';
+  $("i-cat").value = S.labels.some((l) => l.name === selected) ? selected : "";
+}
+
+function showNewLabel(on) {
+  $("new-label").hidden = !on;
+  $("n-new-label").textContent = "";
+  if (on) {
+    $("i-new-label").value = "";
+    $("i-new-label").focus();
+  }
+}
+
+/** 按「加入」：檢查名稱 → 記成待新增（存入聯絡人時才真的建立）→ 直接選用。 */
+function addNewLabel() {
+  const asCategory = S.mode === "category";
+  const r = L.check_new_label($("i-new-label").value, S.labels.map((l) => l.name), asCategory);
+  if (!r.ok) {
+    $("n-new-label").textContent = r.reason;
+    return;
+  }
+  ensureLabel(r.name);
+  showNewLabel(false);
+  if (asCategory) {
+    renderCategoryOptions(r.name);
+    $("i-cat").classList.remove("bad");
+    refreshThird();
+  } else {
+    S.plainLabels.add(r.name);
+    renderLabelChips();
+  }
+  refreshPreview();
+  saveDraft();
 }
 
 function setPhoto(side, photo) {
@@ -313,6 +370,40 @@ function setPhoto(side, photo) {
   tile.classList.toggle("has", Boolean(photo));
   tile.style.backgroundImage = photo ? `url(${photo.url})` : "";
   tile.textContent = photo ? (side === "front" ? "正面（點一下重拍）" : "反面（點一下重拍）") : side === "front" ? "＋拍正面" : "＋拍反面（選填）";
+  $("r-" + side).hidden = !photo;
+}
+
+/** 把原圖順時針轉 turns 次 90°。每次都從原圖重畫，轉幾次畫質都不會變差。 */
+async function turned(orig, turns) {
+  if (!turns) return orig;
+  const url = URL.createObjectURL(orig);
+  try {
+    const img = new Image();
+    await new Promise((ok, no) => {
+      img.onload = ok;
+      img.onerror = no;
+      img.src = url;
+    });
+    const c = document.createElement("canvas");
+    const swap = turns % 2 === 1;
+    c.width = swap ? img.naturalHeight : img.naturalWidth;
+    c.height = swap ? img.naturalWidth : img.naturalHeight;
+    const g = c.getContext("2d");
+    g.translate(c.width / 2, c.height / 2);
+    g.rotate((turns * Math.PI) / 2);
+    g.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    return (await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.9))) || orig;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function rotatePhoto(side) {
+  const ph = S.photos[side];
+  if (!ph) return;
+  const turns = (ph.turns + 1) % 4;
+  const blob = await turned(ph.orig, turns);
+  setPhoto(side, { orig: ph.orig, turns, blob, url: URL.createObjectURL(blob) });
 }
 
 /** 把照片縮到長邊 2000 以內的 JPEG（之後送去辨識也用這個大小）。縮不了就用原檔。 */
@@ -345,7 +436,7 @@ async function onPhotoPicked(side) {
   input.value = "";
   if (!file) return;
   const blob = await shrink(file);
-  setPhoto(side, { blob, url: URL.createObjectURL(blob) });
+  setPhoto(side, { orig: blob, turns: 0, blob, url: URL.createObjectURL(blob) });
 }
 
 /** 把畫面上的內容收成一張「名片」資料（格式見 gcontact.build_person）。 */
@@ -376,11 +467,13 @@ function openForm(draft = null) {
   const d = draft || {};
   $("blk-cat").hidden = $("blk-third").hidden = S.mode !== "category";
   $("blk-labels").hidden = S.mode !== "plain";
-  $("i-cat").innerHTML = '<option value="">（請選擇）</option>' + R.COMPANY_CATEGORIES.map((c) => `<option>${c}</option>`).join("");
-  $("i-cat").value = d.category || store().lastCategory || "";
+  if (d.category) ensureLabel(d.category);
+  for (const n of d.plainLabels || []) if (typeof n === "string" && n && !n.startsWith("contactGroups/")) ensureLabel(n);
+  renderCategoryOptions(d.category || store().lastCategory || "");
+  showNewLabel(false);
   for (const [id, key] of Object.entries(SIMPLE)) $(id).value = d[key] || "";
   S.thirdTouched = Boolean(d.thirdTouched);
-  S.plainLabels = new Set((d.plainLabels || []).filter((rn) => S.labels.some((l) => l.resourceName === rn)));
+  S.plainLabels = new Set((d.plainLabels || []).filter((n) => S.labels.some((l) => l.name === n)));
   $("phones").innerHTML = "";
   $("emails").innerHTML = "";
   const phones = d.phones?.length ? d.phones : [{ kind: "手機", value: "" }, { kind: "公司", value: "" }];
@@ -480,20 +573,18 @@ async function writeNew(card, msgId) {
     busy("準備中…");
     let groups = [];
     let labelNote = "";
-    if (card.mode === "category") {
-      let label = S.labels.find((l) => l.name === card.category);
-      if (!label) {
-        label = await G.createLabel(card.category);
-        S.labels.push(label);
-        labelNote = "（這個標籤原本沒有，已新增）";
+    const wanted = card.mode === "category" ? [card.category] : [...S.plainLabels];
+    const created = [];
+    for (const name of wanted) {
+      const l = ensureLabel(name);
+      if (!l.resourceName) {
+        l.resourceName = (await G.createLabel(name)).resourceName;
+        created.push(name);
       }
-      groups = [label.resourceName];
-      labelNote = `標籤：${card.category}${labelNote}`;
-    } else {
-      groups = [...S.plainLabels];
-      const names = S.labels.filter((l) => S.plainLabels.has(l.resourceName)).map((l) => l.name);
-      labelNote = names.length ? `標籤：${names.join("、")}` : "沒有掛標籤";
+      groups.push(l.resourceName);
     }
+    labelNote = wanted.length ? `標籤：${wanted.join("、")}` : "沒有掛標籤";
+    if (created.length) labelNote += `（「${created.join("」「")}」是新標籤，已新增）`;
     // 先把照片存到雲端硬碟，拿到連結，再和聯絡人一起寫入（網站欄的「名片正面／反面」）。
     // 照片沒存成功也照樣存聯絡人，只是少了連結。存過的照片會記住，重試時不會重複上傳。
     const whole = card.mode === "plain" ? card.name : R.compose(card.category, card.name, card.third);
@@ -618,12 +709,24 @@ async function main() {
     view("login");
   });
 
+  $("b-new-label").addEventListener("click", addNewLabel);
+  $("i-new-label").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") addNewLabel();
+  });
+  $("r-front").addEventListener("click", () => rotatePhoto("front"));
+  $("r-back").addEventListener("click", () => rotatePhoto("back"));
   $("p-front").addEventListener("click", () => $("f-front").click());
   $("p-back").addEventListener("click", () => $("f-back").click());
   $("f-front").addEventListener("change", () => onPhotoPicked("front"));
   $("f-back").addEventListener("change", () => onPhotoPicked("back"));
 
   $("i-cat").addEventListener("change", () => {
+    if ($("i-cat").value === "__new__") {
+      $("i-cat").value = "";
+      showNewLabel(true);
+    } else {
+      showNewLabel(false);
+    }
     $("i-cat").classList.remove("bad");
     refreshThird();
     refreshPreview();
