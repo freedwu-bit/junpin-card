@@ -192,7 +192,7 @@ async function photoFolder() {
   return folder.id;
 }
 
-/** 把一張照片存到使用者自己雲端硬碟的固定資料夾。回傳 { name, shared }。 */
+/** 把一張照片存到使用者自己雲端硬碟的固定資料夾。回傳 { name, shared, link }（link 只有他自己打得開）。 */
 export async function uploadPhoto(blob, name) {
   const folderId = await photoFolder();
   const boundary = "junpin" + Math.random().toString(36).slice(2);
@@ -201,10 +201,10 @@ export async function uploadPhoto(blob, name) {
     `--${boundary}\r\nContent-Type: image/jpeg\r\n\r\n`, blob, `\r\n--${boundary}--`,
   ]);
   const up = await api("POST", DRIVE_UPLOAD, {
-    params: { uploadType: "multipart", fields: "id,name,shared" },
+    params: { uploadType: "multipart", fields: "id,name,shared,webViewLink" },
     rawBody, headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
   });
-  return { name: up.name, shared: Boolean(up.shared) };
+  return { name: up.name, shared: Boolean(up.shared), link: up.webViewLink || (up.id ? `https://drive.google.com/file/d/${up.id}/view` : "") };
 }
 
 export const DEMO = false;

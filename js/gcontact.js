@@ -87,7 +87,8 @@ export function suggest_third(category, { title = "", company = "" } = {}) {
  * card：{ mode: "category"|"plain", category, name, third,
  *         phones: [{ value, kind }], emails: [..], address: { text, zip },
  *         company, department, title, englishName, taxId, website, note,
- *         groupResourceName（一個標籤）或 groupResourceNames（多個標籤） }
+ *         groupResourceName（一個標籤）或 groupResourceNames（多個標籤），
+ *         photoLinks: [{ label: "名片正面", url }]（名片照片在雲端硬碟的連結，寫進網站欄） }
  * 回傳 { body, whole, warnings }。warnings 是需要使用者看一眼的地方（看不懂的電話、地址）。
  */
 export function build_person(card) {
@@ -126,7 +127,12 @@ export function build_person(card) {
 
   if (py.strip(card.englishName || "")) body.nicknames = [{ value: py.strip(card.englishName) }];
   if (py.strip(card.taxId || "")) body.userDefined = [{ key: "統編", value: py.strip(card.taxId) }];
-  if (py.strip(card.website || "")) body.urls = [{ value: py.strip(card.website), type: "work" }];
+  const urls = [];
+  if (py.strip(card.website || "")) urls.push({ value: py.strip(card.website), type: "work" });
+  // 名片照片的連結放在網站欄（使用者 2026-11-19 決定）：萬一辨識錯了沒發現，點連結就能看原本的名片。
+  // 連結指向使用者自己雲端硬碟裡的檔案，只有他自己打得開。不放備註（備註只放使用者自己填的字）。
+  for (const l of card.photoLinks || []) if (l?.url) urls.push({ value: l.url, type: l.label });
+  if (urls.length) body.urls = urls;
   if (py.strip(card.note || "")) body.biographies = [{ value: card.note, contentType: "TEXT_PLAIN" }];
   // 標籤：類別模式剛好一個（和類別同名）；一般模式可以點選零到多個
   const groups = [...new Set([card.groupResourceName, ...(card.groupResourceNames || [])].filter(Boolean))];
@@ -168,6 +174,8 @@ export function verify_created(sent, got) {
       if (!is_safe(view)) probs.push("地址不是安全寫法（被拆到城市、區域等分欄了）");
     }
   }
+  const gotUrls = mine("urls").map((x) => x.value);
+  for (const u of sent.urls || []) if (!gotUrls.includes(u.value)) probs.push(`網站欄的「${u.type}」沒有讀到`);
   const gotOrg = mine("organizations");
   for (const o of sent.organizations || []) {
     if (!gotOrg.some((x) => (x.name || "") === (o.name || "") && (x.title || "") === (o.title || ""))) probs.push("公司欄讀回來不一樣");

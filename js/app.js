@@ -477,7 +477,7 @@ async function writeNew(card, msgId) {
   let made = null;
   const lines = [];
   try {
-    busy("存入聯絡人…");
+    busy("準備中…");
     let groups = [];
     let labelNote = "";
     if (card.mode === "category") {
@@ -494,7 +494,34 @@ async function writeNew(card, msgId) {
       const names = S.labels.filter((l) => S.plainLabels.has(l.resourceName)).map((l) => l.name);
       labelNote = names.length ? `標籤：${names.join("、")}` : "沒有掛標籤";
     }
-    const { body, whole } = GC.build_person({ ...card, groupResourceNames: groups });
+    // 先把照片存到雲端硬碟，拿到連結，再和聯絡人一起寫入（網站欄的「名片正面／反面」）。
+    // 照片沒存成功也照樣存聯絡人，只是少了連結。存過的照片會記住，重試時不會重複上傳。
+    const whole = card.mode === "plain" ? card.name : R.compose(card.category, card.name, card.third);
+    const d = new Date();
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    const photoLinks = [];
+    const photoLines = [];
+    for (const [side, zh] of [["front", "正面"], ["back", "反面"]]) {
+      const ph = S.photos[side];
+      if (!ph) continue;
+      const fileName = `${ymd}_${whole}_${zh}.jpg`;
+      try {
+        if (!ph.uploaded || ph.uploaded.name !== fileName) {
+          busy(`存${zh}照片到雲端硬碟…`);
+          ph.uploaded = await G.uploadPhoto(ph.blob, fileName);
+        }
+        if (ph.uploaded.link) photoLinks.push({ label: `名片${zh}`, url: ph.uploaded.link });
+        photoLines.push(ph.uploaded.shared ? ["warn", `${zh}照片已存，但顯示為「已分享」，請告訴 Claude`]
+          : ["ok", `${zh}照片已存到雲端硬碟「${CONFIG.PHOTO_FOLDER}」，連結放在聯絡人的網站欄「名片${zh}」`]);
+      } catch (e) {
+        if (!G.loggedIn()) throw e; // 登入失效：整個停下來，重新登入後再按一次
+        photoLines.push(["bad", `${zh}照片沒存成功，所以聯絡人裡沒有「名片${zh}」的連結：${G.explain(e)}`]);
+      }
+    }
+    if (!S.photos.front && !S.photos.back) photoLines.push(["", "這一張沒有拍照。"]);
+
+    busy("存入聯絡人…");
+    const { body } = GC.build_person({ ...card, groupResourceNames: groups, photoLinks });
     made = await G.createContact(body);
     lines.push(["ok", `已存入「${whole}」`], ["", labelNote]);
     keep({ draft: null, lastCategory: card.category || store().lastCategory || "" });
@@ -512,21 +539,7 @@ async function writeNew(card, msgId) {
     } catch (e) {
       lines.push(["warn", "聯絡人已存入，但讀回來核對時出錯：" + G.explain(e)]);
     }
-
-    // 照片
-    const d = new Date();
-    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-    for (const [side, zh] of [["front", "正面"], ["back", "反面"]]) {
-      if (!S.photos[side]) continue;
-      busy(`存${zh}照片到雲端硬碟…`);
-      try {
-        const up = await G.uploadPhoto(S.photos[side].blob, `${ymd}_${whole}_${zh}.jpg`);
-        lines.push(up.shared ? ["warn", `${zh}照片已存，但顯示為「已分享」，請告訴 Claude`] : ["ok", `${zh}照片已存到雲端硬碟「${CONFIG.PHOTO_FOLDER}」`]);
-      } catch (e) {
-        lines.push(["bad", `${zh}照片沒存成功（聯絡人已經存好了，不用重存）：${G.explain(e)}`]);
-      }
-    }
-    if (!S.photos.front && !S.photos.back) lines.push(["", "這一張沒有拍照。"]);
+    lines.push(...photoLines);
   } catch (e) {
     busy("");
     if (!made) {

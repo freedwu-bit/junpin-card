@@ -94,5 +94,5 @@ export async function searchAll(queries) {
 }
 export async function uploadPhoto(_blob, name) {
   await sleep(400);
-  return { name, shared: false };
+  return { name, shared: false, link: `https://drive.google.com/file/d/demo${seq++}/view` };
 }
