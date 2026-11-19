@@ -162,10 +162,42 @@
     <div class="msg" id="m-dup"></div>
   </section>
 
+  <!-- 更新現有那一筆 -->
+  <section class="view" id="v-upd" hidden>
+    <h2>更新這一筆</h2>
+    <div class="card">
+      <div class="who" id="upd-who"></div>
+      <p class="sub">只會把名片上有、這一筆沒有的資料補進去。姓名、標籤、備註，以及這一筆現有的內容都不會改。</p>
+    </div>
+    <div class="card">
+      <h3>會補進去的資料</h3>
+      <div id="upd-adds"></div>
+    </div>
+    <div class="card" id="upd-conf-box">
+      <h3>內容不一樣，請您選</h3>
+      <p class="sub">沒有選的，就保留現有的。</p>
+      <div id="upd-conf"></div>
+    </div>
+    <div class="card" id="upd-notes-box">
+      <h3>請留意</h3>
+      <div id="upd-notes"></div>
+    </div>
+    <div class="msg" id="m-upd"></div>
+    <div class="stack" style="margin-top:16px">
+      <button id="b-upd-go">確定更新</button>
+      <button class="second" id="b-upd-back">回上一步</button>
+    </div>
+  </section>
+
   <!-- 存好了 -->
   <section class="view" id="v-done" hidden>
-    <h2>存好了</h2>
+    <h2 id="done-title">存好了</h2>
     <div class="card" id="done-box"></div>
+    <div class="card" id="undo-box" hidden>
+      <p class="sub">如果發現補錯了，可以馬上把這一筆復原成更新前的樣子。</p>
+      <button class="second" id="b-undo">復原這次更新</button>
+      <div class="msg" id="m-undo"></div>
+    </div>
     <div class="stack">
       <button class="big" id="b-next" style="min-height:90px">拍下一張</button>
       <button class="second" id="b-done-home">回首頁</button>

@@ -49,6 +49,7 @@ export function explain(e) {
   if (e?.status === 401) return "登入已失效，請重新登入後再試一次，已填的內容都還在。";
   if (e?.status === 403 && /insufficient|scope/i.test(m)) return "登入時沒有同意全部項目。請重新登入，「聯絡人」和「雲端硬碟」兩項都要勾選。";
   if (e?.status === 429) return "Google 說操作太頻繁，請等一分鐘再試。";
+  if (e?.status === 400 && /etag|precondition/i.test(m)) return "這一筆剛剛在別的地方被改過，所以這次沒有寫入。請回上一步重新比對。";
   return `發生錯誤（${e?.status || "?"}）：${m}`;
 }
 
@@ -207,6 +208,14 @@ export async function createLabel(name) {
 
 export function createContact(body) {
   return api("POST", PEOPLE + "people:createContact", { params: { personFields: PERSON_FIELDS }, body });
+}
+
+/**
+ * 修改現有聯絡人。mask 裡的欄位是「整欄替換」；body 要帶 etag 和聯絡人來源（由 merge.apply_plan 或 writer.build_restore 組好）。
+ * 這一筆如果在這之間被改過，Google 會拒絕（不會寫進去）。
+ */
+export function updateContact(resourceName, mask, body) {
+  return api("PATCH", PEOPLE + resourceName + ":updateContact", { params: { updatePersonFields: mask.join(","), personFields: PERSON_FIELDS }, body });
 }
 
 export function getPerson(resourceName) {

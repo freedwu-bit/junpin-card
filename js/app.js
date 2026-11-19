@@ -7,7 +7,9 @@ import { cn_digits, to_half } from "./cnnum.js";
 import * as D from "./dedupe.js";
 import * as GC from "./gcontact.js";
 import * as L from "./labels.js";
+import * as M from "./merge.js";
 import * as R from "./rules.js";
+import * as W from "./writer.js";
 
 const demo = new URLSearchParams(location.search).has("demo");
 const LS_KEY = demo ? "junpin-card-demo" : "junpin-card";
@@ -24,6 +26,8 @@ const S = {
   plainLabels: new Set(), // 一般模式點選的標籤（存名稱）
   warnSeen: "", // 已經提醒過的黃色警告（同樣的警告不重複擋）
   pendingCard: null, // 查重畫面上等待決定的那一張
+  upd: null, // 「更新這一筆」進行中的資料：{ rn, person（比對時讀到的完整資料）, plan, choices }
+  lastUpdate: null, // 剛完成的更新（用來「復原這次更新」）：{ rn, name }
 };
 
 // ---------- 小工具 ----------
@@ -584,9 +588,209 @@ function renderDup(card, matches) {
       <div class="why">${esc(m.title)}</div>
       <div class="who">${esc(s.name)}</div>
       <div class="more">${esc([...s.orgs, ...s.phones, ...s.emails].join("　｜　") || "（沒有其他資料）")}</div>
-      <button class="second" disabled style="margin-top:10px">更新這一筆（下一版才有）</button>
+      <button class="second" data-update="${esc(m.person.resourceName)}" style="margin-top:10px">更新這一筆</button>
     </div>`;
   }).join("");
+  for (const b of $("dup-list").querySelectorAll("[data-update]")) b.addEventListener("click", () => startUpdate(b.dataset.update));
+}
+
+/** 這一張有拍的照片，先用「待上傳」佔位，讓比對結果看得到「會加上照片連結」。 */
+function pendingPhotoLinks() {
+  return [["front", "名片正面"], ["back", "名片反面"]].filter(([side]) => S.photos[side]).map(([, label]) => ({ label, url: "（存入時上傳）" }));
+}
+
+/**
+ * 把照片存到雲端硬碟，回傳 { photoLinks, photoLines }。存過的會記住，重試時不會重複上傳。
+ * 照片沒存成功不擋後面的步驟（只是少了連結）；登入失效則整個停下來。
+ */
+async function uploadPhotos(nameForFile) {
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const photoLinks = [];
+  const photoLines = [];
+  for (const [side, zh] of [["front", "正面"], ["back", "反面"]]) {
+    const ph = S.photos[side];
+    if (!ph) continue;
+    const fileName = `${ymd}_${nameForFile}_${zh}.jpg`;
+    try {
+      if (!ph.uploaded || ph.uploaded.name !== fileName) {
+        busy(`存${zh}照片到雲端硬碟…`);
+        ph.uploaded = await G.uploadPhoto(ph.blob, fileName);
+      }
+      if (ph.uploaded.link) photoLinks.push({ label: `名片${zh}`, url: ph.uploaded.link });
+      photoLines.push(ph.uploaded.shared ? ["warn", `${zh}照片已存，但顯示為「已分享」，請告訴 Claude`]
+        : ["ok", `${zh}照片已存到雲端硬碟「${CONFIG.PHOTO_FOLDER}」，連結放在聯絡人的網站欄「名片${zh}」`]);
+    } catch (e) {
+      if (!G.loggedIn()) throw e; // 登入失效：整個停下來，重新登入後再按一次
+      photoLines.push(["bad", `${zh}照片沒存成功，所以聯絡人裡沒有「名片${zh}」的連結：${G.explain(e)}`]);
+    }
+  }
+  if (!S.photos.front && !S.photos.back) photoLines.push(["", "這一張沒有拍照。"]);
+  return { photoLinks, photoLines };
+}
+
+function finish(title, lines, undo = null) {
+  busy("");
+  setPhoto("front", null);
+  setPhoto("back", null);
+  S.pendingCard = null;
+  S.upd = null;
+  S.lastUpdate = undo;
+  $("done-title").textContent = title;
+  $("done-box").innerHTML = lines.map(([k, t]) => `<div class="result-line ${k}">${esc(t)}</div>`).join("");
+  $("undo-box").hidden = !undo;
+  $("m-undo").textContent = "";
+  $("b-undo").disabled = false;
+  view("done");
+}
+
+// ---------- 更新現有那一筆（只補缺的、不覆蓋） ----------
+
+async function startUpdate(rn) {
+  busy("讀取那一筆的完整資料…");
+  try {
+    const person = await G.getPerson(rn);
+    S.upd = { rn, person, choices: {}, plan: M.plan_update({ ...S.pendingCard, photoLinks: pendingPhotoLinks() }, person) };
+    $("m-upd").textContent = "";
+    renderUpd();
+    view("upd");
+  } catch (e) {
+    showError("m-dup", e);
+  } finally {
+    busy("");
+  }
+}
+
+function renderUpd() {
+  const { plan, choices } = S.upd;
+  $("upd-who").textContent = plan.existing || "（沒有姓名）";
+  const adds = [...plan.adds.map((a) => `補上${a.label}：${a.text}`), ...plan.fills.map((f) => `補上${f.label}：${f.text}`)];
+  $("upd-adds").innerHTML = adds.length
+    ? adds.map((t) => `<div class="result-line ok">${esc(t)}</div>`).join("")
+    : '<div class="sub">名片上的資料，這一筆都已經有了，沒有東西需要補。</div>';
+  $("upd-conf-box").hidden = !plan.conflicts.length;
+  $("upd-conf").innerHTML = plan.conflicts.map((c) => `<div class="conf"><div class="why">${esc(c.label)}不一樣</div>${
+    c.options.map((o) => `<button type="button" data-conf="${esc(c.id)}" data-pick="${o.key}" class="${(choices[c.id] || "keep") === o.key ? "on" : ""}">${esc(o.text)}</button>`).join("")
+  }</div>`).join("");
+  for (const b of $("upd-conf").querySelectorAll("button")) {
+    b.addEventListener("click", () => {
+      S.upd.choices[b.dataset.conf] = b.dataset.pick;
+      renderUpd();
+    });
+  }
+  $("upd-notes-box").hidden = !plan.notes.length;
+  $("upd-notes").innerHTML = plan.notes.map((t) => `<div class="result-line warn">${esc(t)}</div>`).join("");
+  $("b-upd-go").disabled = !M.has_changes(plan, choices);
+}
+
+async function applyUpdate() {
+  const u = S.upd;
+  const card = S.pendingCard;
+  const msg = $("m-upd");
+  msg.className = "msg";
+  msg.textContent = "";
+  let wrote = false;
+  const lines = [];
+  try {
+    busy("準備中…");
+    const { photoLinks, photoLines } = await uploadPhotos(u.plan.existing || "聯絡人");
+
+    // 規則文件 13 的教訓 8：寫入前重新讀取，和剛才給他看的不一樣就停下來
+    busy("重新讀取那一筆，確認沒有被改過…");
+    const now = await G.getPerson(u.rn);
+    const diff = W.changed_fields(now, u.person, M.APP_CHECK);
+    if (diff.length) {
+      u.person = now;
+      u.choices = {};
+      u.plan = M.plan_update({ ...card, photoLinks: pendingPhotoLinks() }, now);
+      renderUpd();
+      busy("");
+      msg.className = "msg warn";
+      msg.textContent = `這一筆在您查看之後被改過（${diff.map((f) => M.FIELD_LABEL[f] || f).join("、")}），所以這次沒有寫入。上面已經照最新的內容重新比對，請再看一次，沒問題再按「確定更新」。`;
+      return;
+    }
+    const plan = M.plan_update({ ...card, photoLinks }, now);
+    const [mask, body] = M.apply_plan(now, plan, u.choices);
+    if (!mask.length) {
+      busy("");
+      msg.className = "msg warn";
+      msg.textContent = "沒有東西需要更新（照片沒存成功的話，連結也不會加）。";
+      return;
+    }
+    // 修改前先存檔（只存會被改到的欄位和姓名，不存備註）；存不成功就不可以寫入
+    const snap = { resourceName: now.resourceName, names: now.names };
+    for (const f of M.APP_MASK) if (now[f]) snap[f] = now[f];
+    const t = new Date();
+    const run = t.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+    try {
+      W.save_snapshot(localStorage, snap, run);
+      W.prune_snapshots(localStorage, 20);
+    } catch (e) {
+      throw new G.UserError("這支手機沒辦法存「修改前的樣子」（可能是無痕模式或儲存空間滿了），為了安全，這次不更新。");
+    }
+
+    busy("更新聯絡人…");
+    await G.updateContact(u.rn, mask, body);
+    wrote = true;
+    lines.push(["ok", `已更新「${plan.existing}」`]);
+    for (const t2 of M.describe_changes(plan, u.choices)) lines.push(["", "・" + t2]);
+    keep({ draft: null, lastCategory: card.category || store().lastCategory || "" });
+
+    try {
+      const got = await G.getPerson(u.rn);
+      const probs = W.verify(got, now, mask, body, ["memberships"], M.APP_CHECK);
+      if (probs.length) {
+        lines.push(["warn", "更新之後讀回來核對，有地方和預期不一樣，請把這個畫面截圖給 Claude："]);
+        for (const p of probs) lines.push(["", "・" + p.replace(/^(\w+)/, (f) => M.FIELD_LABEL[f] || f)]);
+      } else {
+        lines.push(["ok", "讀回來核對過：補的都在，姓名、備註和其他內容都沒有變"]);
+      }
+    } catch (e) {
+      lines.push(["warn", "已更新，但讀回來核對時出錯：" + G.explain(e)]);
+    }
+    lines.push(...photoLines);
+    for (const n of plan.notes) lines.push(["warn", n]);
+    finish("更新好了", lines, { rn: u.rn, name: plan.existing });
+  } catch (e) {
+    busy("");
+    if (wrote) {
+      lines.push(["warn", "已更新，但後續步驟出錯：" + G.explain(e)]);
+      finish("更新好了", lines, { rn: u.rn, name: u.plan.existing });
+      return;
+    }
+    showError("m-upd", e);
+  }
+}
+
+/** 復原剛才那次更新：把改過的欄位整欄換回更新前的樣子（用更新前存的檔）。 */
+async function undoUpdate() {
+  const msg = $("m-undo");
+  const last = S.lastUpdate;
+  if (!last) return;
+  $("b-undo").disabled = true;
+  busy("復原中…");
+  try {
+    const [, snap] = W.latest_snapshot(localStorage, last.rn);
+    if (!snap) throw new G.UserError("找不到更新前的存檔，沒辦法復原。");
+    const now = await G.getPerson(last.rn);
+    const [mask, body] = W.build_restore(now, snap, M.APP_MASK);
+    if (mask.length) await G.updateContact(last.rn, mask, body);
+    const got = await G.getPerson(last.rn);
+    const left = W.changed_fields(got, snap, M.APP_MASK);
+    busy("");
+    if (left.length) {
+      msg.className = "msg warn";
+      msg.textContent = `復原之後還有地方和更新前不一樣（${left.map((f) => M.FIELD_LABEL[f] || f).join("、")}），請把這個畫面截圖給 Claude。`;
+    } else {
+      msg.className = "msg ok";
+      msg.textContent = `已復原「${last.name}」，和更新前一樣了。已經存到雲端硬碟的照片還在，不需要的話請自己刪。`;
+      S.lastUpdate = null;
+    }
+  } catch (e) {
+    busy("");
+    $("b-undo").disabled = false;
+    showError("m-undo", e);
+  }
 }
 
 /** 新增一筆聯絡人：找標籤 → 寫入 → 讀回核對 → 存照片。寫入成功後，後面的步驟失敗也不會重寫一次。 */
@@ -610,30 +814,8 @@ async function writeNew(card, msgId) {
     labelNote = wanted.length ? `標籤：${wanted.join("、")}` : "沒有掛標籤";
     if (created.length) labelNote += `（「${created.join("」「")}」是新標籤，已新增）`;
     // 先把照片存到雲端硬碟，拿到連結，再和聯絡人一起寫入（網站欄的「名片正面／反面」）。
-    // 照片沒存成功也照樣存聯絡人，只是少了連結。存過的照片會記住，重試時不會重複上傳。
     const whole = card.mode === "plain" ? card.name : R.compose(card.category, card.name, card.third);
-    const d = new Date();
-    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-    const photoLinks = [];
-    const photoLines = [];
-    for (const [side, zh] of [["front", "正面"], ["back", "反面"]]) {
-      const ph = S.photos[side];
-      if (!ph) continue;
-      const fileName = `${ymd}_${whole}_${zh}.jpg`;
-      try {
-        if (!ph.uploaded || ph.uploaded.name !== fileName) {
-          busy(`存${zh}照片到雲端硬碟…`);
-          ph.uploaded = await G.uploadPhoto(ph.blob, fileName);
-        }
-        if (ph.uploaded.link) photoLinks.push({ label: `名片${zh}`, url: ph.uploaded.link });
-        photoLines.push(ph.uploaded.shared ? ["warn", `${zh}照片已存，但顯示為「已分享」，請告訴 Claude`]
-          : ["ok", `${zh}照片已存到雲端硬碟「${CONFIG.PHOTO_FOLDER}」，連結放在聯絡人的網站欄「名片${zh}」`]);
-      } catch (e) {
-        if (!G.loggedIn()) throw e; // 登入失效：整個停下來，重新登入後再按一次
-        photoLines.push(["bad", `${zh}照片沒存成功，所以聯絡人裡沒有「名片${zh}」的連結：${G.explain(e)}`]);
-      }
-    }
-    if (!S.photos.front && !S.photos.back) photoLines.push(["", "這一張沒有拍照。"]);
+    const { photoLinks, photoLines } = await uploadPhotos(whole);
 
     busy("存入聯絡人…");
     const { body } = GC.build_person({ ...card, groupResourceNames: groups, photoLinks });
@@ -665,12 +847,7 @@ async function writeNew(card, msgId) {
     }
     lines.push(["warn", "聯絡人已存入，但後續步驟出錯：" + G.explain(e)]);
   }
-  busy("");
-  setPhoto("front", null);
-  setPhoto("back", null);
-  S.pendingCard = null;
-  $("done-box").innerHTML = lines.map(([k, t]) => `<div class="result-line ${k}">${esc(t)}</div>`).join("");
-  view("done");
+  finish("存好了", lines);
 }
 
 function startCard(withCamera) {
@@ -800,6 +977,9 @@ async function main() {
   });
   $("b-dup-new").addEventListener("click", () => writeNew(S.pendingCard, "m-dup"));
   $("b-dup-back").addEventListener("click", () => view("form"));
+  $("b-upd-go").addEventListener("click", applyUpdate);
+  $("b-upd-back").addEventListener("click", () => view("dup"));
+  $("b-undo").addEventListener("click", undoUpdate);
   $("b-next").addEventListener("click", () => startCard(true));
   $("b-done-home").addEventListener("click", goHome);
 

@@ -12,7 +12,9 @@ let on = false;
 
 const labels = ["廠商", "技師", "業主", "建築師", "雋品", "顧問", "營造", "公部門", "財務", "_待刪除"].map((name, i) => ({ resourceName: `contactGroups/demo${i}`, name }));
 const label = (name) => labels.find((l) => l.name === name).resourceName;
+const src = () => ({ etag: `%E${seq}`, metadata: { sources: [{ type: "CONTACT", id: `id${seq}`, etag: `#e${seq}` }] } });
 const mk = (given, phones, emails, org, groups) => ({
+  ...src(),
   resourceName: `people/demo${seq++}`,
   names: [{ metadata: C, givenName: given, displayName: given }],
   phoneNumbers: phones.map(([value, type]) => ({ metadata: C, value, type })),
@@ -28,6 +30,7 @@ const people = [
 ];
 
 export function explain(e) {
+  if (e?.status === 400 && /etag/i.test(e.message)) return "這一筆剛剛在別的地方被改過，所以這次沒有寫入。請回上一步重新比對。";
   return e instanceof UserError ? e.message : `發生錯誤：${e?.message || e}`;
 }
 export function account() {
@@ -64,6 +67,7 @@ export async function createContact(body) {
   const given = body.names[0].givenName;
   const p = {
     ...structuredClone(body),
+    ...src(),
     resourceName: `people/demo${seq++}`,
     names: [{ metadata: C, givenName: given, displayName: given }],
   };
@@ -71,6 +75,19 @@ export async function createContact(body) {
     if (p[f]) p[f] = p[f].map((x) => ({ metadata: C, ...x }));
   }
   people.push(p);
+  return structuredClone(p);
+}
+export async function updateContact(rn, mask, body) {
+  await sleep(500);
+  const p = people.find((x) => x.resourceName === rn);
+  if (!p || body.etag !== p.etag) {
+    const e = new Error("etag mismatch (demo)");
+    e.status = 400;
+    throw e;
+  }
+  for (const f of mask) p[f] = body[f].map((x) => ({ metadata: C, ...structuredClone(x) }));
+  p.etag = `%E${seq++}`;
+  p.metadata.sources[0].etag = `#e${seq}`;
   return structuredClone(p);
 }
 export async function getPerson(rn) {

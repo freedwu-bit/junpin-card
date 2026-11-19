@@ -66,6 +66,11 @@ input.bad, select.bad { border-color:var(--bad); background:#fff1ef; }
 .dup .why { font-weight:600; font-size:15px; }
 .dup .who { font-size:18px; font-weight:600; color:var(--navy); overflow-wrap:anywhere; }
 .dup .more { color:var(--mute); font-size:14.5px; overflow-wrap:anywhere; }
+.conf { margin:10px 0 14px; } .conf .why { font-weight:600; margin-bottom:6px; }
+.conf button { text-align:left; min-height:46px; font-weight:500; margin-top:6px; background:#fff; color:var(--navy); border:1.5px solid var(--line); }
+.conf button.on { border-color:var(--navy); background:#eef2f8; font-weight:700; }
+.conf button.on::before { content:"● "; } .conf button:not(.on)::before { content:"○ "; }
+#v-upd .who { font-size:18px; font-weight:600; color:var(--navy); overflow-wrap:anywhere; }
 .result-line { margin:4px 0; overflow-wrap:anywhere; }
 .result-line.ok::before { content:"✓ "; color:var(--ok); font-weight:700; }
 .result-line.bad::before { content:"✗ "; color:var(--bad); font-weight:700; }
