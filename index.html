@@ -15,6 +15,7 @@
 </head>
 <body>
 <header>
+  <img class="logo" src="img/logo-mark.png" alt="雋品建築" width="208" height="240">
   <h1>雋品名片</h1>
   <button id="b-home" hidden>首頁</button>
   <button id="b-settings" hidden>設定</button>
@@ -32,7 +33,6 @@
       <div class="msg" id="m-login"></div>
       <p class="sub">登入後一小時內，關掉再開不用重新登入；超過一小時再按一下登入就好。</p>
     </div>
-    <p class="sub">版本：<span id="login-ver"></span></p>
   </section>
 
   <!-- 第一次使用：選姓名模式 -->
@@ -240,8 +240,15 @@
       <button class="second" id="b-logout">登出</button>
       <p class="sub">登出會清掉這支手機裡暫存的登入資料，下次要重新選帳號、重新同意。手機要借給別人前請先登出。</p>
     </div>
-    <p class="sub">版本：<span id="set-ver"></span>　<a href="test.html">開啟測試頁</a></p>
+    <p class="sub"><a href="test.html">開啟測試頁</a></p>
   </section>
+
+  <!-- 每一頁最下方：公司 logo、版權、版次 -->
+  <footer>
+    <img src="img/logo-full.png" alt="雋品建築 JUN-PIN ARCHITECT" width="742" height="234">
+    <div>© 2026 WU, FAN-WEI / JPA. All rights reserved.</div>
+    <div>版本：<span id="foot-ver"></span></div>
+  </footer>
 </main>
 
 <div id="busy" hidden><div class="box"><div class="spin"></div><div id="busy-text"></div></div></div>

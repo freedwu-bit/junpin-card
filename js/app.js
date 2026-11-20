@@ -159,7 +159,7 @@ function showLogin() {
 }
 
 function goHome() {
-  $("home-acct").textContent = "登入帳號：" + G.account() + "　｜　版本：" + CONFIG.VERSION;
+  $("home-acct").textContent = "登入帳號：" + G.account();
   $("home-mode-name").textContent = S.mode === "category" ? "類別模式" : "一般模式";
   $("home-mode-desc").textContent = S.mode === "category"
     ? "姓名會存成「類別-姓名_公司或專長」，例如：廠商-王小明_大順廚具，並掛上和類別同名的標籤。"
@@ -1171,7 +1171,7 @@ function startCard(source) {
 async function main() {
   G = await import(demo ? "./google_mock.js" : "./google.js");
   $("demo-banner").hidden = !demo;
-  $("set-ver").textContent = $("login-ver").textContent = CONFIG.VERSION + (demo ? "（示範）" : "");
+  $("foot-ver").textContent = CONFIG.VERSION + (demo ? "（示範）" : "");
 
   const doLogin = async (other) => {
     const msg = $("m-login");
