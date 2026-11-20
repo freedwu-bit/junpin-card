@@ -13,8 +13,10 @@ header button { width:auto; min-height:40px; padding:4px 12px; background:transp
 
 main { max-width:640px; margin:0 auto; padding: 14px 16px calc(110px + env(safe-area-inset-bottom)); }
 footer { text-align:center; margin:30px 0 0; padding-top:18px; border-top:1px solid var(--line); color:var(--mute); font-size:13px; line-height:1.7; }
-footer img { display:block; width:168px; max-width:50%; height:auto; margin:0 auto 10px; }
-footer .copy { font-size:12.5px; line-height:1.45; margin-bottom:4px; }
+footer .brand { display:inline-block; } /* 寬度由「版本」那一行決定 */
+footer .brand img { display:block; width:0; min-width:100%; height:auto; margin:0 0 8px; } /* width:0 讓圖不影響外框寬度，再用 min-width 撐到和版本那一行一樣寬 */
+footer .ver { white-space:nowrap; }
+footer .copy { font-size:12.5px; margin-top:2px; }
 .view > h2 { font-size:19px; margin:6px 0 10px; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin:12px 0; }
 .card h3 { margin:0 0 6px; font-size:16px; color:var(--navy); }

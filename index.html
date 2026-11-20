@@ -243,11 +243,13 @@
     <p class="sub"><a href="test.html">開啟測試頁</a></p>
   </section>
 
-  <!-- 每一頁最下方：公司 logo、版權、版次 -->
+  <!-- 每一頁最下方：公司 logo、版次、版權。logo 的寬度自動跟著「版本」那一行（見 app.css 的 footer .brand） -->
   <footer>
-    <img src="img/logo-full.png" alt="雋品建築 JUN-PIN ARCHITECT" width="742" height="234">
-    <div class="copy">© 2026 WU, FAN-WEI / JPA.<br>All rights reserved.</div>
-    <div>版本：<span id="foot-ver"></span></div>
+    <div class="brand">
+      <img src="img/logo-full.png" alt="雋品建築 JUN-PIN ARCHITECT" width="742" height="234">
+      <div class="ver">版本：<span id="foot-ver"></span></div>
+    </div>
+    <div class="copy">© 2026 WU, FAN-WEI / JPA. All rights reserved.</div>
   </footer>
 </main>
 
