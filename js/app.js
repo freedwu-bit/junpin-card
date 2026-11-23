@@ -745,19 +745,23 @@ async function autoRecognize(side) {
     return;
   }
   busy(`辨識名片${side === "front" ? "正面" : "反面"}中…`);
+  const t0 = Date.now();
   try {
     const sent = await imageForRecognize(ph.raw);
     const res = await G.recognize({ ...sent, side });
     if (S.photos[side] !== ph) return; // 等的時候照片被換掉了
     const card = REC.clean_result(res.result);
+    let lines;
     if (!card.found) {
-      S.rec[side] = [["warn", "這張照片裡沒有找到名片。請重拍一張（點照片格子），或自己輸入。"]];
+      lines = [["warn", "這張照片裡沒有找到名片。請重拍一張（點照片格子），或自己輸入。"]];
     } else {
       const cropNote = await applyCrop(side, card, sent);
-      const lines = REC.has_content(card) ? applyRecognized(side, card) : [["warn", "名片上的字讀不出來。請重拍一張清楚一點的，或自己輸入。"]];
+      lines = REC.has_content(card) ? applyRecognized(side, card) : [["warn", "名片上的字讀不出來。請重拍一張清楚一點的，或自己輸入。"]];
       if (cropNote) lines.push(["", cropNote]);
-      S.rec[side] = lines;
     }
+    // 測試期間用（2026-11-24 使用者同意）：顯示這次等了幾秒、用量多少，方便估算每張的花費。測試結束後拿掉。
+    lines.push(["stat", REC.stat_line(Date.now() - t0, res)]);
+    S.rec[side] = lines;
   } catch (e) {
     S.rec[side] = [["bad", G.explain(e)]];
     if (!G.loggedIn()) showError("m-form", e); // 登入失效：下面出現「重新登入」按鈕

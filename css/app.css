@@ -87,6 +87,7 @@ input.bad, select.bad { border-color:var(--bad); background:#fff1ef; }
 .result-line.ok::before { content:"✓ "; color:var(--ok); font-weight:700; }
 .result-line.bad::before { content:"✗ "; color:var(--bad); font-weight:700; }
 .result-line.warn::before { content:"△ "; color:var(--warn); font-weight:700; }
+.result-line.stat { color:var(--mute); font-size:13px; margin-top:6px; padding-top:6px; border-top:1px dashed #c9d1dc; } /* 測試期間：這次辨識的秒數與用量 */
 .choice { text-align:left; min-height:76px; }
 .choice small { display:block; font-weight:400; opacity:.85; font-size:14px; }
 

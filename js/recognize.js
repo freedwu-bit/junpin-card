@@ -147,6 +147,24 @@ export function fill_plan(current, card, side = "front") {
   return { set, phones, emails, skipped };
 }
 
+/**
+ * 測試期間顯示在辨識結果最下面的那一行：這次等了幾秒、用量多少。
+ * totalMs：從開始處理照片到結果出來，使用者實際等的時間（毫秒）。res：後台回傳的 { ms（Claude 花的時間）, usage: { input, output } }。
+ * 後台沒有回報的項目就不寫。
+ */
+export function stat_line(totalMs, res) {
+  const sec = (ms) => (ms / 1000).toFixed(1);
+  const num = (n) => Number(n).toLocaleString("en-US");
+  const ok = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  const r = res && typeof res === "object" ? res : {};
+  let s = `測試用：這次共等 ${sec(ok(totalMs) ? totalMs : 0)} 秒`;
+  if (ok(r.ms)) s += `（Claude ${sec(r.ms)} 秒）`;
+  s += "。";
+  const u = r.usage && typeof r.usage === "object" ? r.usage : {};
+  if (ok(u.input) && ok(u.output)) s += `用量：輸入 ${num(u.input)}、輸出 ${num(u.output)}。`;
+  return s;
+}
+
 /** 這次辨識有沒有讀到任何可以填的東西。 */
 export function has_content(card) {
   return SIMPLE.some((k) => card[k]) || card.phones.length > 0 || card.emails.length > 0;
