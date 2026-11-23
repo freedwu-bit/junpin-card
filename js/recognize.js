@@ -148,7 +148,7 @@ export function fill_plan(current, card, side = "front") {
 }
 
 /**
- * 測試期間顯示在辨識結果最下面的那一行：這次等了幾秒、用量多少。
+ * 只給管理者看、顯示在辨識結果最下面的那一行：這次等了幾秒、用量多少。
  * totalMs：從開始處理照片到結果出來，使用者實際等的時間（毫秒）。res：後台回傳的 { ms（Claude 花的時間）, usage: { input, output } }。
  * 後台沒有回報的項目就不寫。
  */

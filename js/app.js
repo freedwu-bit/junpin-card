@@ -15,6 +15,8 @@ import * as R from "./rules.js";
 import * as W from "./writer.js";
 
 const demo = new URLSearchParams(location.search).has("demo");
+/** 登入的是不是管理者帳號（config.js 的 ADMINS）。示範模式當作是；網址再加 &staff=1 可以假裝是一般同事。 */
+const isAdmin = () => (demo ? !new URLSearchParams(location.search).has("staff") : (CONFIG.ADMINS || []).includes(String(G.account() || "").trim().toLowerCase()));
 const LS_KEY = demo ? "junpin-card-demo" : "junpin-card";
 const TRASH_LABEL = "_待刪除";
 const $ = (id) => document.getElementById(id);
@@ -759,8 +761,8 @@ async function autoRecognize(side) {
       lines = REC.has_content(card) ? applyRecognized(side, card) : [["warn", "名片上的字讀不出來。請重拍一張清楚一點的，或自己輸入。"]];
       if (cropNote) lines.push(["", cropNote]);
     }
-    // 測試期間用（2026-11-24 使用者同意）：顯示這次等了幾秒、用量多少，方便估算每張的花費。測試結束後拿掉。
-    lines.push(["stat", REC.stat_line(Date.now() - t0, res)]);
+    // 只有管理者看得到（2026-11-24 使用者決定）：這次等了幾秒、用量多少，方便估算每張的花費、留意用量。
+    if (isAdmin()) lines.push(["stat", REC.stat_line(Date.now() - t0, res)]);
     S.rec[side] = lines;
   } catch (e) {
     S.rec[side] = [["bad", G.explain(e)]];
@@ -1221,6 +1223,7 @@ async function main() {
   $("b-home").addEventListener("click", goHome);
   $("b-settings").addEventListener("click", () => {
     $("set-acct").textContent = G.account();
+    $("set-test").hidden = !isAdmin(); // 測試頁的連結只給管理者看
     $("set-mode-now").textContent = S.mode === "category" ? "類別模式" : "一般模式";
     for (const b of document.querySelectorAll("[data-setmode]")) b.classList.toggle("second", b.dataset.setmode !== S.mode);
     view("settings");

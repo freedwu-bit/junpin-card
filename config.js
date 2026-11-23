@@ -6,5 +6,8 @@ export const CONFIG = {
   BACKEND_URL: "https://script.google.com/macros/s/AKfycbzj0J0mLYwaFKt0J84i5f5Ji74kWIY4FBJLrp5T6FEcdGE7OuGXGcHTVjLHCVjGA4TrMg/exec",
   WORKSPACE_DOMAIN: "junpin.com.tw",    // 只允許這個公司網域的帳號
   PHOTO_FOLDER: "雋品名片_照片",         // 名片照片在雲端硬碟的資料夾名稱
-  VERSION: "2026-11-24 版-21",
+  // 管理者帳號：只有這些帳號看得到設定頁的「開啟測試頁」和每次辨識的秒數、用量。
+  // 這只是「畫面上顯不顯示」，不是權限（2026-11-24 使用者同意把自己的公司 Email 寫在這個公開的檔案裡）。
+  ADMINS: ["freedwu@junpin.com.tw"],
+  VERSION: "2026-11-24 版-22",
 };
