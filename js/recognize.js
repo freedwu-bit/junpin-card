@@ -6,7 +6,9 @@
 // - clean_result：去掉空白與佔位文字、統編誤放進電話的拿掉、列出要請使用者特別核對的地方（沒把握的欄位、可能的簡體字）。
 // - fill_plan：只填「目前空著」的格子，已經有內容的不動（使用者自己打的字不會被蓋掉）。
 // - rotate_from_top：Claude 回報「字的頭頂朝照片哪一邊」→ 要轉幾度（2026-11-25：直接問「順時針轉幾度」它會答反）。
-// - needs_recheck／recheck_plan：讀到的電話不合理時，用轉正後的照片再讀一次，挑出可以更正的號碼。
+// - needs_recheck／recheck_plan：讀到的電話不合理時，在背景再讀一次，挑出可以更正的號碼。
+// - is_sideways／needs_flip：側躺的照片轉完後在背景確認方向，倒了就再翻 180°。
+// - top_note／direction_note：管理者那一行顯示 Claude 答的方向、背景做了什麼。
 import { cn_digits, to_half } from "./cnnum.js";
 import * as GC from "./gcontact.js";
 import * as py from "./pyre.js";
@@ -36,6 +38,36 @@ const TOP_TO_ROTATE = { 上: 0, 右: 270, 下: 180, 左: 90 };
  */
 export function rotate_from_top(top) {
   return typeof top === "string" && Object.hasOwn(TOP_TO_ROTATE, top) ? TOP_TO_ROTATE[top] : null;
+}
+/**
+ * 第一次回報的方向是不是「側躺」（要轉 90° 或 270°）。
+ * 2026-11-25 實測：側躺時 Claude 的左右會答反（朝左答成朝右），所以轉完要在背景再確認一次方向。
+ */
+export function is_sideways(rotate) {
+  const d = rotate === null || rotate === undefined || rotate === "" ? NaN : Number(rotate);
+  return d === 90 || d === 270;
+}
+/**
+ * 轉正之後再看一次的結果（clean_result 的回傳）要不要再翻 180°：回報「整張上下顛倒」才要（表示剛才轉反了）。
+ * 其他答案（正的、又說側躺、沒找到名片）一律不動。正的和倒的 Claude 分得出來，左右才會答反。
+ */
+export function needs_flip(card) {
+  return Boolean(card && card.found) && Number(card.rotate) === 180 && card.rotate !== null && card.rotate !== "";
+}
+/** Claude 回報的方向，給管理者那一行用：「字頭朝右」；舊版後台回報度數時是「順時針轉 90°」；沒有就是空字串。 */
+export function top_note(result) {
+  const r = result && typeof result === "object" ? result : {};
+  if (rotate_from_top(r.card_top) !== null) return `字頭朝${r.card_top}`;
+  const d = r.rotate_clockwise;
+  return (typeof d === "number" || (typeof d === "string" && d !== "")) && [0, 90, 180, 270].includes(Number(d)) ? `順時針轉 ${Number(d)}°` : "";
+}
+/**
+ * 管理者那一行後面加的說明：Claude 答的方向、背景還做了什麼（background：字串；沒傳就不寫背景那一句）。
+ * 之後看截圖就知道發生什麼事（2026-11-25）。
+ */
+export function direction_note(result, background) {
+  const top = top_note(result);
+  return (top ? `方向：Claude 答「${top}」。` : "") + (background === undefined ? "" : `背景：${background || "沒有另外再讀"}。`);
 }
 const same = (a, b) => R.norm_text(a || "") === R.norm_text(b || "");
 

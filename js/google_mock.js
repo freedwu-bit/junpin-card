@@ -134,9 +134,23 @@ const TOP = { 90: "左", 180: "下", 270: "右" };
 const badphone = new URLSearchParams(globalThis.location?.search || "").has("badphone");
 // 開發時檢查「電話順序」用：網址再加 &nomobile=1，名片上只有公司電話和傳真（沒有手機）
 const nomobile = new URLSearchParams(globalThis.location?.search || "").has("nomobile");
+// 開發時檢查「側躺時左右答反」用：網址再加 &wrongside=1（要和 &rot=90 或 270 一起用），
+// 第一次故意把左右答反；轉完之後再問（背景確認方向或重讀電話）會回報「下」（倒的），翻正之後回報「上」
+let wrongside = new URLSearchParams(globalThis.location?.search || "").has("wrongside");
+const OPPOSITE = { 左: "右", 右: "左" };
+/** 假裝 Claude 看這張圖回報的方向。第一次看的是原圖；p.retry 有值表示看的是 App 轉過的圖。 */
+function mockTop(p) {
+  const real = TOP[rot] || "上";
+  if (!p.retry) return wrongside && OPPOSITE[real] ? OPPOSITE[real] : real;
+  if (wrongside && OPPOSITE[real]) {
+    wrongside = false; // 這一次回報倒的；App 翻正之後再問就是正的
+    return "下";
+  }
+  return "上";
+}
 export async function recognize(p) {
   await sleep(1500);
-  const base = { card_found: true, name: "", english_name: "", company: "", department: "", title: "", phones: [], emails: [], address: "", zip: "", tax_id: "", website: "", other: [], unsure: [], card_box: box(p.width, p.height), card_top: TOP[rot] || "上" };
+  const base = { card_found: true, name: "", english_name: "", company: "", department: "", title: "", phones: [], emails: [], address: "", zip: "", tax_id: "", website: "", other: [], unsure: [], card_box: box(p.width, p.height), card_top: mockTop(p) };
   const result = p.side === "back"
     ? { ...base, english_name: "Tina Lin", company: "Zhuguang Interior Design Co., Ltd.", title: "Design Director", phones: [{ kind: "手機", value: "+886 933 222 111" }], emails: ["yating@example.com"], address: "8F., No. 100, Sec. 4, Zhongxiao E. Rd., Taipei" }
     : {

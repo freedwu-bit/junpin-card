@@ -31,6 +31,7 @@ const S = {
   photos: { front: null, back: null },
   recog: null, // 後台的辨識功能準備好了沒（Promise："ready"、"nokey"、"old"、"unknown"）
   rec: { front: null, back: null }, // 各面的辨識結果說明：[[種類, 文字, 動作?], …]
+  bg: { front: null, back: null }, // 各面還在背景做的事（重讀電話、確認方向）的 Promise，做完變回 null；存入前會等它
   thirdTouched: false, // 使用者自己改過第三段，就不再自動帶入建議
   plainLabels: new Set(), // 一般模式點選的標籤（存名稱）
   warnSeen: "", // 已經提醒過的黃色警告（同樣的警告不重複擋）
@@ -579,16 +580,22 @@ const toBase64 = (blob) => new Promise((ok, no) => {
 
 /**
  * 準備送去辨識的圖：JPEG，大小在 Claude 不會再縮小的範圍內（這樣它回報的名片位置才對得回來）。
+ * maxEdge 有給的話再縮到長邊不超過這麼多像素。
  * 回傳 { image（base64）, width, height }。
  */
-async function imageForRecognize(blob) {
+async function imageForRecognize(blob, maxEdge = 0) {
   let img;
   try {
     img = await loadImg(blob);
   } catch {
     throw new G.UserError("這張照片手機讀不了，請重拍一張，或自己輸入。");
   }
-  const [w, h] = CI.resized_size(img.naturalWidth, img.naturalHeight);
+  let [w, h] = CI.resized_size(img.naturalWidth, img.naturalHeight);
+  if (maxEdge && Math.max(w, h) > maxEdge) { // 只確認方向時用的縮小圖
+    const k = maxEdge / Math.max(w, h);
+    w = Math.max(1, Math.round(w * k));
+    h = Math.max(1, Math.round(h * k));
+  }
   let out = blob;
   if (w !== img.naturalWidth || h !== img.naturalHeight || blob.type !== "image/jpeg") {
     const c = document.createElement("canvas");
@@ -702,31 +709,84 @@ function applyRecognized(side, card) {
   return { lines, addedPhones };
 }
 
+const DIRECTION_EDGE = 1000; // 只確認方向時送的縮小圖（長邊像素）：看得出字是正的還是倒的就夠了，比較省
+
+/** 把自動轉正的照片再翻 180°（背景確認方向時發現轉反了）。等的時候照片被動過就不翻，回傳 null。 */
+async function flipPhoto(side, ph) {
+  const turns = (ph.turns + 2) % 4;
+  const blob = await turned(ph.orig, turns);
+  if (S.photos[side] !== ph) return null;
+  const next = { ...ph, uploaded: undefined, turns, blob, url: URL.createObjectURL(blob), auto: { orig: ph.auto.orig, turns }, useAuto: true };
+  setPhoto(side, next);
+  return next;
+}
+
 /**
- * 這次填的電話裡有程式看不懂的（多半是多讀或少讀一碼）：在背景用「裁切、轉正後的照片」再讀一次，
- * 讀到合理的號碼就換掉。不擋畫面，使用者可以先核對其他格子（2026-11-25 使用者：不要再變慢）。
- * 照片沒有被裁切或轉正過就不做（再送同一張圖多半得到同樣的結果）。
+ * 第一次的結果出來之後，在背景做的防呆。不擋畫面，使用者可以先核對其他格子
+ * （2026-11-25 使用者：重點是防呆、不影響辨識速度）。
+ * 1. 這次填的電話裡有程式看不懂的（多半是多讀或少讀一碼）→ 用現在這張照片（有自動裁切轉正的話就是轉正後的）
+ *    再讀一次，讀到合理的號碼就換掉、標黃色。照片沒被動過也照樣重讀（實測：帶著「上次碼數不合理」的提醒重讀才讀得對）。
+ * 2. 第一次回報名片是側躺的（字頭朝左或朝右）→ 轉完之後確認方向。實測 Claude 側躺時左右會答反，轉完可能是倒的；
+ *    正的、倒的它分得出來，所以再看一次，回報「倒的」就再翻 180°。
+ *    電話本來就要重讀時，那一次順便就有方向；不用重讀電話時，另外送一張縮小的圖只看方向。
+ *    翻正之後如果電話要重讀，用翻正後的圖再讀一次（倒的圖讀到的電話不可靠）。
+ * 做的事記在 S.bg[side]（Promise）：存入前會等它做完，避免把倒的照片、還沒更正的電話存進去。
+ * 回傳背景做什麼的說明（給管理者那一行用；沒做事是空字串）。
  */
-function recheckPhones(side, rows, lines) {
-  const ph = S.photos[side];
+function backgroundChecks(side, rows, lines, card) {
   const val = (row) => row.querySelector("input").value.trim();
   const kindOf = (row) => row.querySelector("select").value;
-  const bad = rows.filter((row) => REC.needs_recheck(val(row), kindOf(row))).map((row) => ({ row, kind: kindOf(row), value: val(row) }));
-  if (!bad.length || !ph?.auto || !ph.useAuto) return;
-  const line = ["", "有電話號碼的長度不合理，正在用轉正後的照片再讀一次…（可以先核對其他格子）"];
-  lines.splice(lines.findIndex((l) => l[0] === "stat") >= 0 ? lines.findIndex((l) => l[0] === "stat") : lines.length, 0, line);
-  const t0 = Date.now();
-  (async () => {
+  const bad = (rows || []).filter((row) => REC.needs_recheck(val(row), kindOf(row))).map((row) => ({ row, kind: kindOf(row), value: val(row) }));
+  let ph = S.photos[side];
+  const sideways = Boolean(ph?.auto && ph.useAuto) && REC.is_sideways(card.rotate);
+  if (!ph || (!bad.length && !sideways)) return "";
+  const file = ph.file;
+  const replaced = () => S.photos[side]?.file !== file; // 等的時候換了另一張照片，或已經存好、開新的一張
+  const put = (l) => { // 插在管理者那幾行的前面
+    const i = lines.findIndex((x) => x[0] === "stat");
+    lines.splice(i >= 0 ? i : lines.length, 0, l);
+  };
+  const show = () => {
+    if (S.rec[side] === lines) renderRec();
+  };
+  const line = bad.length ? ["", "有電話號碼的長度不合理，正在再讀一次…（可以先核對其他格子）"] : null;
+  if (line) put(line);
+  let lastStat = null;
+  const ask = async (what) => {
+    const t0 = Date.now();
+    const sent = await imageForRecognize(ph.blob, bad.length ? 0 : DIRECTION_EDGE);
+    const res = await G.recognize({ ...sent, side, retry: bad.length ? "phones" : "direction" });
+    if (isAdmin()) {
+      lastStat = ["stat", REC.stat_line(Date.now() - t0, res).replace("這次共等", `背景${what}花了`) + REC.direction_note(res.result)];
+      lines.push(lastStat);
+    }
+    return REC.clean_result(res.result);
+  };
+  const task = (async () => {
     try {
-      const sent = await imageForRecognize(ph.blob);
-      const res = await G.recognize({ ...sent, side, retry: "phones" });
-      if (S.photos[side] !== ph) { // 等的時候照片被換掉、轉過，或已經存好了：不動表單
-        line[0] = "warn";
-        line[1] = "照片有變動，電話沒有重讀。請對照名片自己改。";
-        if (S.rec[side] === lines) renderRec();
+      let again = await ask(bad.length ? "重讀電話" : "確認方向");
+      if (replaced()) {
+        if (line) [line[0], line[1]] = ["warn", "照片已經換了，電話沒有重讀。請對照名片自己改。"];
         return;
       }
-      const fixes = REC.recheck_plan(bad, REC.clean_result(res.result));
+      if (sideways && REC.needs_flip(again)) {
+        const next = await flipPhoto(side, ph); // 使用者這段時間自己轉過照片就不翻（next 是 null）
+        if (next) {
+          ph = next;
+          put(["warn", "照片剛才轉反了，已經自動翻正。還是不對的話，可以按照片下面的「轉 90°」。"]);
+          if (lastStat) lastStat[1] += "已再翻 180°。";
+          show();
+          if (bad.length) {
+            again = await ask("翻正後重讀電話");
+            if (replaced()) {
+              [line[0], line[1]] = ["warn", "照片已經換了，電話沒有重讀。請對照名片自己改。"];
+              return;
+            }
+          }
+        } else if (lastStat) lastStat[1] += "照片已被手動轉過，沒有再翻。";
+      }
+      if (!bad.length) return;
+      const fixes = REC.recheck_plan(bad, again);
       const done = [];
       for (const f of fixes) {
         const b = bad.find((x) => x.value === f.value && x.kind === f.kind);
@@ -744,13 +804,15 @@ function recheckPhones(side, rows, lines) {
       const left = bad.filter((b) => b.row.isConnected && REC.needs_recheck(val(b.row), kindOf(b.row))).length;
       line[0] = done.length && !left ? "ok" : "warn";
       line[1] = [done.length ? `重讀後更正了電話（已標黃色，請核對）：${done.join("；")}` : "", left ? "再讀一次還是有電話看不懂，請對照名片自己改。" : ""].filter(Boolean).join(" ");
-      if (isAdmin()) lines.push(["stat", REC.stat_line(Date.now() - t0, res).replace("這次共等", "再讀一次花了")]);
-    } catch (e) {
-      line[0] = "warn";
-      line[1] = "電話沒有重讀成功，請對照名片自己改。";
+    } catch {
+      if (line) [line[0], line[1]] = ["warn", "電話沒有重讀成功，請對照名片自己改。"];
+    } finally {
+      if (S.bg[side] === task) S.bg[side] = null;
+      show();
     }
-    if (S.rec[side] === lines) renderRec();
   })();
+  S.bg[side] = task;
+  return bad.length ? (sideways ? "重讀電話（順便確認方向）" : "重讀電話") : "確認方向";
 }
 
 function renderRec() {
@@ -815,6 +877,7 @@ async function autoRecognize(side) {
     const card = REC.clean_result(res.result);
     let lines;
     let recheckRows = null;
+    let bgNote = "";
     if (!card.found) {
       lines = [["warn", "這張照片裡沒有找到名片。請重拍一張（點照片格子），或自己輸入。"]];
     } else {
@@ -823,11 +886,11 @@ async function autoRecognize(side) {
       lines = filled ? filled.lines : [["warn", "名片上的字讀不出來。請重拍一張清楚一點的，或自己輸入。"]];
       if (cropNote) lines.push(["", cropNote]);
       recheckRows = filled ? filled.addedPhones : null;
+      bgNote = backgroundChecks(side, recheckRows, lines, card); // 不等它：結果先出來，重讀電話、確認方向在背景做
     }
-    // 只有管理者看得到（2026-11-24 使用者決定）：這次等了幾秒、用量多少，方便估算每張的花費、留意用量。
-    if (isAdmin()) lines.push(["stat", REC.stat_line(Date.now() - t0, res)]);
+    // 只有管理者看得到（2026-11-24 使用者決定）：這次等了幾秒、用量多少、Claude 答的方向、背景還做了什麼。
+    if (isAdmin()) lines.push(["stat", REC.stat_line(Date.now() - t0, res) + REC.direction_note(res.result, bgNote)]);
     S.rec[side] = lines;
-    if (recheckRows) recheckPhones(side, recheckRows, lines);
   } catch (e) {
     S.rec[side] = [["bad", G.explain(e)]];
     if (!G.loggedIn()) showError("m-form", e); // 登入失效：下面出現「重新登入」按鈕
@@ -906,6 +969,15 @@ async function onSave() {
   const msg = $("m-form");
   msg.className = "msg";
   msg.textContent = "";
+  // 0. 背景還在重讀電話或確認照片方向：先等它做完（最多 20 秒），免得把倒的照片、還沒更正的電話存進去
+  if (S.bg.front || S.bg.back) {
+    busy("正在確認照片方向和電話，請稍等…");
+    try {
+      await Promise.race([Promise.all([S.bg.front, S.bg.back]), new Promise((ok) => setTimeout(ok, 20000))]);
+    } finally {
+      busy("");
+    }
+  }
   // 1. 每一格再整理一次（有些手機按存入時，最後那一格還沒失去焦點）
   const warns = [...[...$("phones").children].map(tidyPhone), ...[...$("emails").children].map(tidyEmail), tidyAddress()].filter(Boolean);
   // 辨識時沒把握、使用者還沒動過的格子（黃色）也算
