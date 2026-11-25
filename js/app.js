@@ -199,6 +199,14 @@ function phoneRow(kind = "手機", value = "") {
   return row;
 }
 
+/** 把電話那幾列排成 手機 → 公司 → 傳真（空的排最後）。只在辨識填完之後排，使用者自己打字時不會突然換位置。 */
+function sortPhoneRows() {
+  const box = $("phones");
+  const rows = [...box.children];
+  const sorted = REC.sort_phones(rows.map((row) => ({ row, kind: row.querySelector("select").value, value: row.querySelector("input").value }))).map((x) => x.row);
+  if (sorted.some((row, i) => row !== rows[i])) box.append(...sorted);
+}
+
 /** 照規則整理一支電話；看不懂的不硬改，標黃色並說明原因（規則文件 5.4）。 */
 function tidyPhone(row) {
   const input = row.querySelector("input");
@@ -655,6 +663,7 @@ function applyRecognized(side, card) {
 
   // 照原本那套規則整理格式（和自己打字時一樣）
   for (const row of $("phones").children) tidyPhone(row);
+  sortPhoneRows(); // 整理之後才排（09 開頭的會被改成手機）
   for (const row of $("emails").children) tidyEmail(row);
   tidyAddress();
   $("i-tax").value = cn_digits(toHalf($("i-tax").value)).trim();
@@ -834,7 +843,8 @@ async function recognizeAgain() {
 
 /** 把畫面上的內容收成一張「名片」資料（格式見 gcontact.build_person）。 */
 function collect() {
-  const phones = [...$("phones").children].map((row) => ({ kind: row.querySelector("select").value, value: row.querySelector("input").value.trim() })).filter((p) => p.value);
+  // 存進聯絡人的順序固定是 手機 → 公司 → 傳真（自己打字時畫面上的列不會跳動，存的時候才排）
+  const phones = REC.sort_phones([...$("phones").children].map((row) => ({ kind: row.querySelector("select").value, value: row.querySelector("input").value.trim() })).filter((p) => p.value));
   const emails = [...$("emails").children].map((row) => row.querySelector("input").value.trim()).filter(Boolean);
   const card = { mode: S.mode, category: S.mode === "category" ? $("i-cat").value : "", phones, emails };
   for (const [id, key] of Object.entries(SIMPLE)) card[key] = $(id).value.trim();

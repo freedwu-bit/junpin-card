@@ -132,6 +132,8 @@ const rot = new URLSearchParams(globalThis.location?.search || "").get("rot");
 const TOP = { 90: "左", 180: "下", 270: "右" };
 // 開發時檢查「電話不合理就再讀一次」用：網址再加 &badphone=1，第一次故意多讀一碼，再讀一次才讀對
 const badphone = new URLSearchParams(globalThis.location?.search || "").has("badphone");
+// 開發時檢查「電話順序」用：網址再加 &nomobile=1，名片上只有公司電話和傳真（沒有手機）
+const nomobile = new URLSearchParams(globalThis.location?.search || "").has("nomobile");
 export async function recognize(p) {
   await sleep(1500);
   const base = { card_found: true, name: "", english_name: "", company: "", department: "", title: "", phones: [], emails: [], address: "", zip: "", tax_id: "", website: "", other: [], unsure: [], card_box: box(p.width, p.height), card_top: TOP[rot] || "上" };
@@ -143,5 +145,6 @@ export async function recognize(p) {
       emails: ["yating@example.com"], address: "臺北市大安區忠孝東路四段一〇〇號八樓", zip: "106", tax_id: "12345675", website: "www.example.com",
       other: ["LINE：yating_design"], unsure: ["title"],
     };
+  if (nomobile) result.phones = result.phones.filter((x) => x.kind !== "手機");
   return { ok: true, result, model: "demo", usage: { input: 0, output: 0 }, ms: 1500 };
 }

@@ -234,6 +234,15 @@ export function recheck_plan(bad, card) {
   return out;
 }
 
+/**
+ * 電話的排列順序：手機 → 公司 → 傳真（使用者 2026-11-25 決定）；同一種的維持原本的先後；空的排最後。
+ * list：[{ kind, value, … }]。回傳排好的新陣列（不改原本的）。
+ */
+export function sort_phones(list) {
+  const rank = (p) => (text(p?.value) ? (KINDS.includes(p.kind) ? KINDS.indexOf(p.kind) : KINDS.length) : KINDS.length + 1);
+  return (list || []).map((p, i) => ({ p, i, r: rank(p) })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.p);
+}
+
 /** 這次辨識有沒有讀到任何可以填的東西。 */
 export function has_content(card) {
   return SIMPLE.some((k) => card[k]) || card.phones.length > 0 || card.emails.length > 0;
