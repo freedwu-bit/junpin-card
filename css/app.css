@@ -29,6 +29,8 @@ button.plain { background:transparent; color:var(--navy); border:0; min-height:4
 button.big { min-height:120px; font-size:24px; border-radius:16px; letter-spacing:.1em; }
 button:disabled { opacity:.4; }
 .stack > * + * { margin-top:10px; }
+.shoot-tip { display:flex; gap:12px; align-items:center; background:#eef2f8; border-radius:10px; padding:10px 12px; font-size:14.5px; line-height:1.55; }
+.shoot-tip svg { flex:none; } .shoot-tip .t { color:var(--navy); }
 
 label { display:block; font-size:14.5px; color:var(--mute); margin:10px 0 3px; }
 input[type=text], input[type=tel], input[type=email], input[type=url], select, textarea { font:inherit; width:100%; min-height:46px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#fff; color:var(--ink); }
