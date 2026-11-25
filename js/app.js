@@ -626,7 +626,7 @@ async function applyCrop(side, card, sent) {
 
 const ID_OF = { name: "i-name", company: "i-company", department: "i-dept", title: "i-title", address: "i-addr", zip: "i-zip", englishName: "i-en", taxId: "i-tax", website: "i-web" };
 
-/** 把辨識結果填進表單（只填空著的格子），回傳要顯示的說明。 */
+/** 把辨識結果填進表單（只填空著的格子），回傳 { lines: 要顯示的說明, addedPhones: 這次填的電話那幾列 }。 */
 function applyRecognized(side, card) {
   const now = collect();
   const plan = REC.fill_plan({ ...now, address: now.address.text, zip: now.address.zip }, card, side);
@@ -690,7 +690,58 @@ function applyRecognized(side, card) {
       saveDraft();
     } }]);
   }
-  return lines;
+  return { lines, addedPhones };
+}
+
+/**
+ * 這次填的電話裡有程式看不懂的（多半是多讀或少讀一碼）：在背景用「裁切、轉正後的照片」再讀一次，
+ * 讀到合理的號碼就換掉。不擋畫面，使用者可以先核對其他格子（2026-11-25 使用者：不要再變慢）。
+ * 照片沒有被裁切或轉正過就不做（再送同一張圖多半得到同樣的結果）。
+ */
+function recheckPhones(side, rows, lines) {
+  const ph = S.photos[side];
+  const val = (row) => row.querySelector("input").value.trim();
+  const kindOf = (row) => row.querySelector("select").value;
+  const bad = rows.filter((row) => REC.needs_recheck(val(row), kindOf(row))).map((row) => ({ row, kind: kindOf(row), value: val(row) }));
+  if (!bad.length || !ph?.auto || !ph.useAuto) return;
+  const line = ["", "有電話號碼的長度不合理，正在用轉正後的照片再讀一次…（可以先核對其他格子）"];
+  lines.splice(lines.findIndex((l) => l[0] === "stat") >= 0 ? lines.findIndex((l) => l[0] === "stat") : lines.length, 0, line);
+  const t0 = Date.now();
+  (async () => {
+    try {
+      const sent = await imageForRecognize(ph.blob);
+      const res = await G.recognize({ ...sent, side, retry: "phones" });
+      if (S.photos[side] !== ph) { // 等的時候照片被換掉、轉過，或已經存好了：不動表單
+        line[0] = "warn";
+        line[1] = "照片有變動，電話沒有重讀。請對照名片自己改。";
+        if (S.rec[side] === lines) renderRec();
+        return;
+      }
+      const fixes = REC.recheck_plan(bad, REC.clean_result(res.result));
+      const done = [];
+      for (const f of fixes) {
+        const b = bad.find((x) => x.value === f.value && x.kind === f.kind);
+        if (!b || !b.row.isConnected || val(b.row) !== f.value) continue; // 使用者已經自己改了：不動
+        const input = b.row.querySelector("input");
+        input.value = f.fixed;
+        tidyPhone(b.row);
+        input.classList.add("check");
+        const note = b.row.querySelector(".note");
+        note.className = "note warn";
+        note.textContent = `第一次讀成「${f.value}」，重讀後更正。請對照名片核對。${note.textContent}`;
+        done.push(`${f.value} → ${input.value}`);
+      }
+      saveDraft();
+      const left = bad.filter((b) => b.row.isConnected && REC.needs_recheck(val(b.row), kindOf(b.row))).length;
+      line[0] = done.length && !left ? "ok" : "warn";
+      line[1] = [done.length ? `重讀後更正了電話（已標黃色，請核對）：${done.join("；")}` : "", left ? "再讀一次還是有電話看不懂，請對照名片自己改。" : ""].filter(Boolean).join(" ");
+      if (isAdmin()) lines.push(["stat", REC.stat_line(Date.now() - t0, res).replace("這次共等", "再讀一次花了")]);
+    } catch (e) {
+      line[0] = "warn";
+      line[1] = "電話沒有重讀成功，請對照名片自己改。";
+    }
+    if (S.rec[side] === lines) renderRec();
+  })();
 }
 
 function renderRec() {
@@ -754,16 +805,20 @@ async function autoRecognize(side) {
     if (S.photos[side] !== ph) return; // 等的時候照片被換掉了
     const card = REC.clean_result(res.result);
     let lines;
+    let recheckRows = null;
     if (!card.found) {
       lines = [["warn", "這張照片裡沒有找到名片。請重拍一張（點照片格子），或自己輸入。"]];
     } else {
       const cropNote = await applyCrop(side, card, sent);
-      lines = REC.has_content(card) ? applyRecognized(side, card) : [["warn", "名片上的字讀不出來。請重拍一張清楚一點的，或自己輸入。"]];
+      const filled = REC.has_content(card) ? applyRecognized(side, card) : null;
+      lines = filled ? filled.lines : [["warn", "名片上的字讀不出來。請重拍一張清楚一點的，或自己輸入。"]];
       if (cropNote) lines.push(["", cropNote]);
+      recheckRows = filled ? filled.addedPhones : null;
     }
     // 只有管理者看得到（2026-11-24 使用者決定）：這次等了幾秒、用量多少，方便估算每張的花費、留意用量。
     if (isAdmin()) lines.push(["stat", REC.stat_line(Date.now() - t0, res)]);
     S.rec[side] = lines;
+    if (recheckRows) recheckPhones(side, recheckRows, lines);
   } catch (e) {
     S.rec[side] = [["bad", G.explain(e)]];
     if (!G.loggedIn()) showError("m-form", e); // 登入失效：下面出現「重新登入」按鈕

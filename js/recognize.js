@@ -5,7 +5,10 @@
 // 這個檔做的事：
 // - clean_result：去掉空白與佔位文字、統編誤放進電話的拿掉、列出要請使用者特別核對的地方（沒把握的欄位、可能的簡體字）。
 // - fill_plan：只填「目前空著」的格子，已經有內容的不動（使用者自己打的字不會被蓋掉）。
+// - rotate_from_top：Claude 回報「字的頭頂朝照片哪一邊」→ 要轉幾度（2026-11-25：直接問「順時針轉幾度」它會答反）。
+// - needs_recheck／recheck_plan：讀到的電話不合理時，用轉正後的照片再讀一次，挑出可以更正的號碼。
 import { cn_digits, to_half } from "./cnnum.js";
+import * as GC from "./gcontact.js";
 import * as py from "./pyre.js";
 import * as R from "./rules.js";
 
@@ -25,6 +28,15 @@ const clean = (v) => {
   return R.is_placeholder(s) ? "" : s;
 };
 const digits = (s) => py.sub(String.raw`\D`, "", s || "");
+
+const TOP_TO_ROTATE = { 上: 0, 右: 270, 下: 180, 左: 90 };
+/**
+ * 名片上的字，頭頂朝向照片的哪一邊（上、右、下、左）→ 照片要順時針轉幾度字才是正的。
+ * 例：頭頂朝右（要把頭往右歪才讀得正）→ 要逆時針轉 90°，也就是順時針 270°。認不得的回傳 null。
+ */
+export function rotate_from_top(top) {
+  return typeof top === "string" && Object.hasOwn(TOP_TO_ROTATE, top) ? TOP_TO_ROTATE[top] : null;
+}
 const same = (a, b) => R.norm_text(a || "") === R.norm_text(b || "");
 
 /** 一支電話用來比對「是不是同一支」的依據：整理得出來的用整理後的號碼＋分機，整理不出來的用純數字。 */
@@ -54,7 +66,7 @@ export function clean_result(raw) {
     title: clean(r.title), address: clean(r.address), zip: text(r.zip), taxId: text(r.tax_id), website: text(r.website),
     phones: [], emails: [], other: [], unsure: [], flags: [],
     box: r.card_box && typeof r.card_box === "object" ? r.card_box : null,
-    rotate: r.rotate_clockwise,
+    rotate: rotate_from_top(r.card_top) ?? r.rotate_clockwise, // 新版後台回報 card_top；舊版回報 rotate_clockwise
   };
 
   // 電話：種類只有三種；同一支重複的只留一個；和統編相同的 8 碼不是電話（規則文件 12.3 看過的錯）
@@ -163,6 +175,63 @@ export function stat_line(totalMs, res) {
   const u = r.usage && typeof r.usage === "object" ? r.usage : {};
   if (ok(u.input) && ok(u.output)) s += `用量：輸入 ${num(u.input)}、輸出 ${num(u.output)}。`;
   return s;
+}
+
+/**
+ * 這支電話要不要「用轉正後的照片再讀一次」：程式整理不出來（多半是多讀或少讀了一碼）才要。
+ * 國外號碼本來就不整理，不算。
+ */
+export function needs_recheck(value, kind) {
+  const v = text(value);
+  if (!v) return false;
+  const r = GC.prepare_phone(v, KINDS.includes(kind) ? kind : "公司");
+  return !r.ok && !/^國外號碼/.test(r.reason || "");
+}
+
+/** 比對用的數字：國字、全形先轉掉，開頭的 886（國碼）換成 0，這樣「+886 3…」和「03…」比得起來。 */
+function national_digits(value) {
+  const d = digits(cn_digits(to_half(value || "")));
+  if (!d.startsWith("886")) return d;
+  const rest = d.slice(3);
+  return rest.startsWith("0") ? rest : "0" + rest;
+}
+
+/** 兩串數字差幾碼（多一碼、少一碼、錯一碼各算 1）。 */
+function digit_distance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/**
+ * 再讀一次之後，哪些看不懂的電話可以換成新讀到的。
+ * bad：第一次讀到、程式看不懂的電話 [{ kind, value }]。card：第二次辨識的 clean_result。
+ * 規則：新讀到的號碼要「程式整理得出來」，而且和原本那支只差 1～2 碼（確定是同一支，不是名片上別的號碼）；
+ * 差得一樣少時優先選同一種（手機／公司／傳真）。每支新號碼只用一次。
+ * 回傳 [{ value: 原本的寫法, kind, fixed: 新讀到的寫法 }]；找不到可以換的就不列。
+ */
+export function recheck_plan(bad, card) {
+  const pool = (card?.phones || []).filter((p) => GC.prepare_phone(p.value, p.kind).ok).map((p) => ({ ...p, d: national_digits(p.value) }));
+  const out = [];
+  for (const b of bad || []) {
+    const mine = national_digits(b.value);
+    let best = null;
+    for (const p of pool) {
+      if (p.used) continue;
+      const dist = digit_distance(mine, p.d);
+      if (dist < 1 || dist > 2) continue;
+      const score = dist * 2 + (p.kind === b.kind ? 0 : 1);
+      if (!best || score < best.score) best = { p, score };
+    }
+    if (!best) continue;
+    best.p.used = true;
+    out.push({ value: b.value, kind: b.kind, fixed: best.p.value });
+  }
+  return out;
 }
 
 /** 這次辨識有沒有讀到任何可以填的東西。 */

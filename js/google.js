@@ -317,11 +317,11 @@ export async function ping() {
 }
 
 /**
- * 辨識一張名片照片。p：{ image（JPEG 的 base64）, width, height, side: "front" 或 "back" }。
+ * 辨識一張名片照片。p：{ image（JPEG 的 base64）, width, height, side: "front" 或 "back", retry（選填 "phones"：轉正後再讀一次） }。
  * 回傳後台的 { result, model, usage, ms }；失敗丟出看得懂的錯誤。
  */
 export async function recognize(p) {
-  const j = await backend({ action: "recognize", image: p.image, width: p.width, height: p.height, side: p.side }, 75000);
+  const j = await backend({ action: "recognize", image: p.image, width: p.width, height: p.height, side: p.side, retry: p.retry }, 75000);
   if (j.ok) return j;
   if (j.code === "auth") {
     forgetToken();
